@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ExternalLink, Filter, Layers, MapPinned, Search } from "lucide-react";
+import {
+  BarChart3,
+  ExternalLink,
+  Filter,
+  Layers,
+  LocateFixed,
+  MapPinned,
+  Search,
+  TableProperties,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +22,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 const TXDOT_LAYER_URL =
   "https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/TxDOT_Projects_Info/FeatureServer/0";
@@ -53,18 +70,50 @@ const colorByPhase: Record<string, [number, number, number, number]> = {
 type Summary = {
   count: number;
   totalCost: number;
+  mpoCost: number;
+  nonMpoCost: number;
+  nearTermCount: number;
   counties: string[];
   corridors: string[];
+  countyTotals: Array<[string, number]>;
+  phaseTotals: Array<[string, number]>;
+  projects: ProjectRecord[];
   lastUpdated: string | null;
 };
 
 type ArcGisFeatureAttributes = {
+  OBJECTID?: number;
+  CONTROL_SECT_JOB?: string;
   COUNTY_NAME?: string;
+  DISTRICT_NAME?: string;
   HIGHWAY_NUMBER?: string;
   HWY_NBR?: string;
+  LIMITS_FROM?: string;
+  LIMITS_TO?: string;
+  TYPE_OF_WORK?: string;
+  PROJ_CLASS?: string;
+  PROJ_STAT?: string;
+  PROJ_STG?: string;
   PT_PHASE?: string;
+  ESTMTD_FISCAL_YR?: number;
   EST_CONSTRUCTION_COST?: number;
   LAST_PROJ_UPDATE_DT?: number;
+  MPO_NM?: string;
+  PROJ_ID?: string;
+};
+
+type ProjectRecord = {
+  objectId: number;
+  csj: string;
+  county: string;
+  district: string;
+  corridor: string;
+  limits: string;
+  work: string;
+  phase: string;
+  fiscalYear: number | null;
+  cost: number;
+  group: "8-county MPO" | "5-county non-MPO";
 };
 
 type QueryResponse = {
@@ -81,7 +130,7 @@ type ArcGisApi = {
   FeatureLayer: new (args: Record<string, unknown>) => {
     definitionExpression: string;
     refresh: () => void;
-    queryExtent: () => Promise<{ extent?: unknown }>;
+    queryExtent: (query?: Record<string, unknown>) => Promise<{ extent?: unknown }>;
     queryFeatures: (query: Record<string, unknown>) => Promise<QueryResponse>;
   };
   Legend: new (args: Record<string, unknown>) => unknown;
@@ -96,6 +145,16 @@ declare global {
 
 const countyWhere = `COUNTY_NAME IN (${hgacCounties.map((county) => `'${county}'`).join(",")})`;
 const baseWhere = `PRJ_UTP = 1 AND ${countyWhere}`;
+const mpoCounties = new Set([
+  "Brazoria",
+  "Chambers",
+  "Fort Bend",
+  "Galveston",
+  "Harris",
+  "Liberty",
+  "Montgomery",
+  "Waller",
+]);
 
 const currency = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 1,
@@ -162,8 +221,14 @@ export default function Home() {
   const [summary, setSummary] = useState<Summary>({
     count: 0,
     totalCost: 0,
+    mpoCost: 0,
+    nonMpoCost: 0,
+    nearTermCount: 0,
     counties: [],
     corridors: [],
+    countyTotals: [],
+    phaseTotals: [],
+    projects: [],
     lastUpdated: null,
   });
   const [mapStatus, setMapStatus] = useState("Loading TxDOT AGO layer");
@@ -392,11 +457,18 @@ export default function Home() {
         </div>
       </header>
 
-      <section className="mx-auto grid w-full max-w-7xl flex-1 gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:px-8">
+      <section className="mx-auto grid w-full max-w-7xl gap-4 px-4 py-4 sm:px-6 lg:grid-cols-4 lg:px-8">
+        <Metric label="2027 UTP features" value={summary.count.toLocaleString()} detail="Live AGO records in view" />
+        <Metric label="Estimated cost" value={formatCurrency(summary.totalCost)} detail="Construction cost total" />
+        <Metric label="8-county MPO" value={formatCurrency(summary.mpoCost)} detail="Metropolitan counties" />
+        <Metric label="Near-term projects" value={summary.nearTermCount.toLocaleString()} detail="FY 2027-2030" />
+      </section>
+
+      <section className="mx-auto grid w-full max-w-7xl flex-1 gap-4 px-4 pb-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-8">
         <section className="min-h-[660px] overflow-hidden rounded-lg border bg-white shadow-sm">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <h2 className="flex items-center gap-2 text-base font-semibold">
-              <MapPinned className="size-4 text-emerald-700" /> UTP Projects
+              <MapPinned className="size-4 text-emerald-700" /> 2027 UTP Project Locations
             </h2>
             <Badge variant="secondary" className="rounded-md">
               {mapStatus}
@@ -411,12 +483,36 @@ export default function Home() {
               <Layers className="size-4 text-cyan-700" /> Current View
             </h2>
             <div className="mt-4 grid grid-cols-2 gap-3">
-              <Metric label="UTP features" value={summary.count.toLocaleString()} />
-              <Metric label="Est. cost" value={formatCurrency(summary.totalCost)} />
+              <SmallMetric label="5 non-MPO" value={formatCurrency(summary.nonMpoCost)} />
+              <SmallMetric label="Counties" value={summary.counties.length.toLocaleString()} />
             </div>
             <p className="mt-3 text-xs leading-5 text-muted-foreground">
               Counts and costs are queried from the TxDOT AGO layer using the active filters. This map intentionally excludes non-UTP records.
             </p>
+          </section>
+
+          <section className="rounded-lg border bg-white p-4 shadow-sm">
+            <h2 className="flex items-center gap-2 text-base font-semibold">
+              <BarChart3 className="size-4 text-emerald-700" /> County Investment
+            </h2>
+            <div className="mt-4 space-y-3">
+              {summary.countyTotals.slice(0, 7).map(([name, amount]) => (
+                <div key={name}>
+                  <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+                    <span className="font-medium">{name}</span>
+                    <span className="text-muted-foreground">{formatCurrency(amount)}</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-muted">
+                    <div
+                      className="h-2 rounded-full bg-emerald-700"
+                      style={{
+                        width: `${Math.max((amount / (summary.countyTotals[0]?.[1] || 1)) * 100, 4)}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
           </section>
 
           <section className="rounded-lg border bg-white p-4 shadow-sm">
@@ -426,6 +522,18 @@ export default function Home() {
                 <Badge key={item} variant="outline" className="rounded-md">
                   {item}
                 </Badge>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-lg border bg-white p-4 shadow-sm">
+            <h2 className="text-base font-semibold">Project Timing</h2>
+            <div className="mt-3 grid gap-2">
+              {summary.phaseTotals.map(([item, amount]) => (
+                <div key={item} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+                  <span>{item}</span>
+                  <span className="font-medium">{formatCurrency(amount)}</span>
+                </div>
               ))}
             </div>
           </section>
@@ -459,11 +567,83 @@ export default function Home() {
           </section>
         </aside>
       </section>
+
+      <section className="mx-auto w-full max-w-7xl px-4 pb-6 sm:px-6 lg:px-8">
+        <section className="rounded-lg border bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="flex items-center gap-2 text-base font-semibold">
+                <TableProperties className="size-4 text-slate-700" /> 2027 UTP Project List
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Select a project to zoom the map to its location. The list uses the same live AGO filter as the map.
+              </p>
+            </div>
+            <Badge variant="outline" className="w-fit rounded-md">
+              Showing top {Math.min(summary.projects.length, 60)} by cost
+            </Badge>
+          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Project</TableHead>
+                <TableHead>County</TableHead>
+                <TableHead>Location</TableHead>
+                <TableHead>Work</TableHead>
+                <TableHead>Timing</TableHead>
+                <TableHead>FY</TableHead>
+                <TableHead className="text-right">Cost</TableHead>
+                <TableHead className="text-right">Map</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {summary.projects.slice(0, 60).map((project) => (
+                <TableRow key={project.objectId}>
+                  <TableCell>
+                    <div className="font-medium">{project.corridor}</div>
+                    <div className="font-mono text-xs text-muted-foreground">{project.csj}</div>
+                  </TableCell>
+                  <TableCell>{project.county}</TableCell>
+                  <TableCell className="max-w-[280px] whitespace-normal text-muted-foreground">
+                    {project.limits}
+                  </TableCell>
+                  <TableCell className="max-w-[240px] whitespace-normal">{project.work}</TableCell>
+                  <TableCell className="max-w-[220px] whitespace-normal text-muted-foreground">
+                    {project.phase}
+                  </TableCell>
+                  <TableCell>{project.fiscalYear ?? "N/A"}</TableCell>
+                  <TableCell className="text-right font-semibold">{formatCurrency(project.cost)}</TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => zoomToProject(project.objectId, layerRef.current, viewRef.current)}
+                    >
+                      <LocateFixed /> Zoom
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </section>
+      </section>
     </main>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <section className="rounded-lg border bg-white p-4 shadow-sm">
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <p className="mt-2 text-2xl font-semibold tracking-normal">{value}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
+    </section>
+  );
+}
+
+function SmallMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border bg-muted/30 p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
@@ -480,11 +660,24 @@ async function refreshLayerSummary(
   const response = await layer.queryFeatures({
     where,
     outFields: [
+      "OBJECTID",
+      "CONTROL_SECT_JOB",
       "COUNTY_NAME",
+      "DISTRICT_NAME",
       "HIGHWAY_NUMBER",
       "HWY_NBR",
+      "LIMITS_FROM",
+      "LIMITS_TO",
+      "TYPE_OF_WORK",
+      "PROJ_CLASS",
+      "PROJ_STAT",
+      "PROJ_STG",
+      "PT_PHASE",
+      "ESTMTD_FISCAL_YR",
       "EST_CONSTRUCTION_COST",
       "LAST_PROJ_UPDATE_DT",
+      "MPO_NM",
+      "PROJ_ID",
     ],
     returnGeometry: false,
     num: 2000,
@@ -495,10 +688,20 @@ async function refreshLayerSummary(
   const corridors = topValues(
     attributes.map((item) => item.HIGHWAY_NUMBER || item.HWY_NBR).filter(Boolean),
   );
+  const projects = attributes.map(toProjectRecord).sort((a, b) => b.cost - a.cost);
   const totalCost = attributes.reduce(
     (sum, item) => sum + Number(item.EST_CONSTRUCTION_COST ?? 0),
     0,
   );
+  const mpoCost = projects
+    .filter((project) => project.group === "8-county MPO")
+    .reduce((sum, project) => sum + project.cost, 0);
+  const nonMpoCost = totalCost - mpoCost;
+  const nearTermCount = projects.filter(
+    (project) => project.fiscalYear !== null && project.fiscalYear <= 2030,
+  ).length;
+  const countyTotals = groupAmount(projects, "county");
+  const phaseTotals = groupAmount(projects, "phase");
   const latestUpdate = Math.max(
     ...attributes.map((item) => Number(item.LAST_PROJ_UPDATE_DT ?? 0)),
     0,
@@ -507,10 +710,36 @@ async function refreshLayerSummary(
   setSummary({
     count: attributes.length,
     totalCost,
+    mpoCost,
+    nonMpoCost,
+    nearTermCount,
     counties,
     corridors,
+    countyTotals,
+    phaseTotals,
+    projects,
     lastUpdated: latestUpdate ? new Date(latestUpdate).toLocaleDateString() : null,
   });
+}
+
+function toProjectRecord(attributes: ArcGisFeatureAttributes): ProjectRecord {
+  const county = attributes.COUNTY_NAME || "Unknown";
+  const from = attributes.LIMITS_FROM || "Unknown";
+  const to = attributes.LIMITS_TO || "Unknown";
+
+  return {
+    objectId: Number(attributes.OBJECTID),
+    csj: attributes.CONTROL_SECT_JOB || "N/A",
+    county,
+    district: attributes.DISTRICT_NAME || "Unknown",
+    corridor: attributes.HIGHWAY_NUMBER || attributes.HWY_NBR || "Unknown",
+    limits: `${from} to ${to}`,
+    work: attributes.TYPE_OF_WORK || attributes.PROJ_CLASS || "Unspecified",
+    phase: attributes.PT_PHASE || "Unspecified",
+    fiscalYear: attributes.ESTMTD_FISCAL_YR ?? null,
+    cost: Number(attributes.EST_CONSTRUCTION_COST ?? 0),
+    group: mpoCounties.has(county) ? "8-county MPO" : "5-county non-MPO",
+  };
 }
 
 async function zoomToLayer(
@@ -521,6 +750,35 @@ async function zoomToLayer(
   const result = await layer.queryExtent({ where });
   if (result.extent) {
     (view as any).goTo(result.extent, { duration: 450 }).catch(() => undefined);
+  }
+}
+
+async function zoomToProject(
+  objectId: number,
+  layer: ArcGisApi["FeatureLayer"] | null,
+  view: ReturnType<ArcGisApi["MapView"]> | null,
+) {
+  if (!layer || !view) {
+    return;
+  }
+
+  const where = `OBJECTID = ${objectId}`;
+  const extentResult = await layer.queryExtent({ where });
+  if (extentResult.extent) {
+    await (view as any).goTo(extentResult.extent, { duration: 500 }).catch(() => undefined);
+  }
+
+  const featureResult = await layer.queryFeatures({
+    where,
+    outFields: ["*"],
+    returnGeometry: true,
+  });
+  const feature = featureResult.features?.[0];
+  if (feature) {
+    (view as any).popup.open({
+      features: [feature],
+      location: (feature as any).geometry?.extent?.center ?? (feature as any).geometry,
+    });
   }
 }
 
@@ -537,4 +795,14 @@ function topValues(values: string[]) {
   return Object.entries(counts)
     .sort((a, b) => b[1] - a[1])
     .map(([value]) => value);
+}
+
+function groupAmount(projects: ProjectRecord[], key: "county" | "phase") {
+  const totals = projects.reduce<Record<string, number>>((acc, project) => {
+    const value = project[key] || "Unspecified";
+    acc[value] = (acc[value] ?? 0) + project.cost;
+    return acc;
+  }, {});
+
+  return Object.entries(totals).sort((a, b) => b[1] - a[1]);
 }
