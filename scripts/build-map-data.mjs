@@ -138,6 +138,7 @@ while (true) {
     type: "Feature",
     geometry: simplifiedGeometry,
     properties: {
+      uniqueId: `${properties.PROJ_ID || properties.CONTROL_SE || "feature"}-${features.length}`,
       id: properties.PROJ_ID,
       csj: properties.CONTROL_SE,
       county,

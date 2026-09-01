@@ -53,6 +53,7 @@ type MapFeature = {
     coordinates: number[][] | number[][][];
   };
   properties: {
+    uniqueId: string;
     id: string;
     csj: string;
     county: string;
@@ -772,12 +773,12 @@ function ProjectMap({
           <path d="M120 40V500M280 40V500M440 40V500M600 40V500M760 40V500M920 40V500" stroke="#c7d7d1" strokeWidth="1" />
         </g>
         {features.slice().reverse().map((feature) => {
-          const isSelected = selectedFeature?.properties.id === feature.properties.id;
+          const isSelected = selectedFeature?.properties.uniqueId === feature.properties.uniqueId;
           const stroke = colorForGroup(feature.properties.group);
 
           return (
             <path
-              key={feature.properties.id}
+              key={feature.properties.uniqueId}
               d={geometryPath(feature.geometry, bbox)}
               fill="none"
               stroke={stroke}
