@@ -371,13 +371,7 @@ export default function Home() {
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                <Badge variant="outline" className="rounded-md border-emerald-200 bg-emerald-50 text-emerald-800">
-                  Live TxDOT AGO layer
-                </Badge>
-                <span>Filtered to PRJ_UTP = 1</span>
-              </div>
-              <h1 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950">
+              <h1 className="text-3xl font-semibold tracking-normal text-slate-950">
                 H-GAC UTP Project Map
               </h1>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-700">
@@ -465,17 +459,25 @@ export default function Home() {
       </section>
 
       <section className="mx-auto grid w-full max-w-7xl flex-1 gap-4 px-4 pb-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-8">
-        <section className="min-h-[660px] overflow-hidden rounded-lg border bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b px-4 py-3">
-            <h2 className="flex items-center gap-2 text-base font-semibold">
-              <MapPinned className="size-4 text-emerald-700" /> 2027 UTP Project Locations
-            </h2>
-            <Badge variant="secondary" className="rounded-md">
-              {mapStatus}
-            </Badge>
-          </div>
-          <div ref={mapRef} className="h-[620px] w-full" />
-        </section>
+        <div className="grid content-start gap-4">
+          <section className="overflow-hidden rounded-lg border bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <h2 className="flex items-center gap-2 text-base font-semibold">
+                <MapPinned className="size-4 text-emerald-700" /> 2027 UTP Project Locations
+              </h2>
+              <Badge variant="secondary" className="rounded-md">
+                {mapStatus}
+              </Badge>
+            </div>
+            <div ref={mapRef} className="h-[620px] w-full" />
+          </section>
+
+          <ProjectList
+            layer={layerRef.current}
+            summary={summary}
+            view={viewRef.current}
+          />
+        </div>
 
         <aside className="grid content-start gap-4">
           <section className="rounded-lg border bg-white p-4 shadow-sm">
@@ -568,67 +570,6 @@ export default function Home() {
         </aside>
       </section>
 
-      <section className="mx-auto w-full max-w-7xl px-4 pb-6 sm:px-6 lg:px-8">
-        <section className="rounded-lg border bg-white p-4 shadow-sm">
-          <div className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h2 className="flex items-center gap-2 text-base font-semibold">
-                <TableProperties className="size-4 text-slate-700" /> 2027 UTP Project List
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                Select a project to zoom the map to its location. The list uses the same live AGO filter as the map.
-              </p>
-            </div>
-            <Badge variant="outline" className="w-fit rounded-md">
-              Showing top {Math.min(summary.projects.length, 60)} by cost
-            </Badge>
-          </div>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Project</TableHead>
-                <TableHead>County</TableHead>
-                <TableHead>Location</TableHead>
-                <TableHead>Work</TableHead>
-                <TableHead>Timing</TableHead>
-                <TableHead>FY</TableHead>
-                <TableHead className="text-right">Cost</TableHead>
-                <TableHead className="text-right">Map</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {summary.projects.slice(0, 60).map((project) => (
-                <TableRow key={project.objectId}>
-                  <TableCell>
-                    <div className="font-medium">{project.corridor}</div>
-                    <div className="font-mono text-xs text-muted-foreground">{project.csj}</div>
-                  </TableCell>
-                  <TableCell>{project.county}</TableCell>
-                  <TableCell className="max-w-[280px] whitespace-normal text-muted-foreground">
-                    {project.limits}
-                  </TableCell>
-                  <TableCell className="max-w-[240px] whitespace-normal">{project.work}</TableCell>
-                  <TableCell className="max-w-[220px] whitespace-normal text-muted-foreground">
-                    {project.phase}
-                  </TableCell>
-                  <TableCell>{project.fiscalYear ?? "N/A"}</TableCell>
-                  <TableCell className="text-right font-semibold">{formatCurrency(project.cost)}</TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => zoomToProject(project.objectId, layerRef.current, viewRef.current)}
-                    >
-                      <LocateFixed /> Zoom
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </section>
-      </section>
     </main>
   );
 }
@@ -639,6 +580,78 @@ function Metric({ label, value, detail }: { label: string; value: string; detail
       <p className="text-sm text-muted-foreground">{label}</p>
       <p className="mt-2 text-2xl font-semibold tracking-normal">{value}</p>
       <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
+    </section>
+  );
+}
+
+function ProjectList({
+  layer,
+  summary,
+  view,
+}: {
+  layer: ArcGisApi["FeatureLayer"] | null;
+  summary: Summary;
+  view: ReturnType<ArcGisApi["MapView"]> | null;
+}) {
+  return (
+    <section className="rounded-lg border bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h2 className="flex items-center gap-2 text-base font-semibold">
+            <TableProperties className="size-4 text-slate-700" /> 2027 UTP Project List
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Select a project to zoom the map to its location. The list uses the same live AGO filter as the map.
+          </p>
+        </div>
+        <Badge variant="outline" className="w-fit rounded-md">
+          Showing top {Math.min(summary.projects.length, 60)} by cost
+        </Badge>
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Project</TableHead>
+            <TableHead>County</TableHead>
+            <TableHead>Location</TableHead>
+            <TableHead>Work</TableHead>
+            <TableHead>Timing</TableHead>
+            <TableHead>FY</TableHead>
+            <TableHead className="text-right">Cost</TableHead>
+            <TableHead className="text-right">Map</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {summary.projects.slice(0, 60).map((project) => (
+            <TableRow key={project.objectId}>
+              <TableCell>
+                <div className="font-medium">{project.corridor}</div>
+                <div className="font-mono text-xs text-muted-foreground">{project.csj}</div>
+              </TableCell>
+              <TableCell>{project.county}</TableCell>
+              <TableCell className="max-w-[280px] whitespace-normal text-muted-foreground">
+                {project.limits}
+              </TableCell>
+              <TableCell className="max-w-[240px] whitespace-normal">{project.work}</TableCell>
+              <TableCell className="max-w-[220px] whitespace-normal text-muted-foreground">
+                {project.phase}
+              </TableCell>
+              <TableCell>{project.fiscalYear ?? "N/A"}</TableCell>
+              <TableCell className="text-right font-semibold">{formatCurrency(project.cost)}</TableCell>
+              <TableCell className="text-right">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => zoomToProject(project.objectId, layer, view)}
+                >
+                  <LocateFixed /> Zoom
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </section>
   );
 }
