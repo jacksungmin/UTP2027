@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   Bot,
@@ -44,6 +44,42 @@ type Project = {
   amount: number;
   group: RegionGroup;
   status: "RTP match" | "Possible RTP match" | "Needs review";
+};
+
+type MapFeature = {
+  type: "Feature";
+  geometry: {
+    type: "LineString" | "MultiLineString";
+    coordinates: number[][] | number[][][];
+  };
+  properties: {
+    id: string;
+    csj: string;
+    county: string;
+    district: string;
+    corridor: string;
+    from: string;
+    to: string;
+    work: string;
+    projectClass: string;
+    stage: string;
+    status: string;
+    phase: string;
+    fiscalYear: number;
+    estimatedConstruction: number;
+    primaryCategory: string;
+    group: RegionGroup;
+  };
+};
+
+type MapData = {
+  type: "FeatureCollection";
+  bbox: [number, number, number, number];
+  features: MapFeature[];
+  metadata: {
+    featureCount: number;
+    generatedAt: string;
+  };
 };
 
 const counties = [
@@ -268,6 +304,18 @@ export default function Home() {
   const [category, setCategory] = useState(categoryOptions[0]);
   const [corridor, setCorridor] = useState(corridorOptions[0]);
   const [query, setQuery] = useState("");
+  const [mapData, setMapData] = useState<MapData | null>(null);
+  const [selectedFeature, setSelectedFeature] = useState<MapFeature | null>(null);
+
+  useEffect(() => {
+    fetch("/data/hgac-projects.geojson")
+      .then((response) => response.json())
+      .then((data: MapData) => {
+        setMapData(data);
+        setSelectedFeature(data.features[0] ?? null);
+      })
+      .catch(() => setMapData(null));
+  }, []);
 
   const filteredProjects = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -295,6 +343,41 @@ export default function Home() {
       return regionMatch && countyMatch && categoryMatch && corridorMatch && queryMatch;
     });
   }, [category, corridor, county, query, region]);
+
+  const filteredMapFeatures = useMemo(() => {
+    if (!mapData) {
+      return [];
+    }
+
+    const normalizedQuery = query.trim().toLowerCase();
+
+    return mapData.features.filter((feature) => {
+      const properties = feature.properties;
+      const regionMatch = region === "All H-GAC" || properties.group === region;
+      const countyMatch = county === "All counties" || properties.county === county;
+      const categoryMatch =
+        category === "All categories" || properties.primaryCategory.includes(category.replace("Category ", ""));
+      const corridorMatch = corridor === "All corridors" || properties.corridor === corridor;
+      const queryMatch =
+        normalizedQuery.length === 0 ||
+        [
+          properties.csj,
+          properties.county,
+          properties.district,
+          properties.corridor,
+          properties.from,
+          properties.to,
+          properties.work,
+          properties.projectClass,
+          properties.primaryCategory,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedQuery);
+
+      return regionMatch && countyMatch && categoryMatch && corridorMatch && queryMatch;
+    });
+  }, [category, corridor, county, mapData, query, region]);
 
   const allTotal = totalAmount(projects);
   const filteredTotal = totalAmount(filteredProjects);
@@ -437,6 +520,31 @@ export default function Home() {
           </div>
 
           <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
+            <section className="rounded-lg border bg-card p-4 shadow-sm xl:col-span-2">
+              <div className="mb-4 flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h2 className="flex items-center gap-2 text-base font-semibold">
+                    <MapPinned className="size-4 text-cyan-700" /> Interactive Project Map
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    TxDOT GIS layer filtered to the 13 H-GAC counties.
+                  </p>
+                </div>
+                <Badge variant="outline" className="w-fit rounded-md">
+                  {mapData ? `${filteredMapFeatures.length.toLocaleString()} of ${mapData.metadata.featureCount.toLocaleString()} features` : "Loading layer"}
+                </Badge>
+              </div>
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+                <ProjectMap
+                  bbox={mapData?.bbox ?? null}
+                  features={filteredMapFeatures}
+                  selectedFeature={selectedFeature}
+                  onSelect={setSelectedFeature}
+                />
+                <MapDetails feature={selectedFeature} />
+              </div>
+            </section>
+
             <section className="rounded-lg border bg-card p-4 shadow-sm">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
@@ -621,4 +729,183 @@ function MetricCard({ label, value, detail }: { label: string; value: string; de
       <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
     </section>
   );
+}
+
+function ProjectMap({
+  bbox,
+  features,
+  selectedFeature,
+  onSelect,
+}: {
+  bbox: [number, number, number, number] | null;
+  features: MapFeature[];
+  selectedFeature: MapFeature | null;
+  onSelect: (feature: MapFeature) => void;
+}) {
+  if (!bbox) {
+    return (
+      <div className="grid min-h-[420px] place-items-center rounded-lg border bg-muted/30 text-sm text-muted-foreground">
+        Loading GIS layer
+      </div>
+    );
+  }
+
+  if (features.length === 0) {
+    return (
+      <div className="grid min-h-[420px] place-items-center rounded-lg border bg-muted/30 text-sm text-muted-foreground">
+        No mapped projects match the current filters.
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border bg-[#eff5f2]">
+      <svg
+        role="img"
+        aria-label="Interactive map of H-GAC area TxDOT project features"
+        viewBox="0 0 1000 520"
+        className="h-[420px] w-full"
+      >
+        <rect width="1000" height="520" fill="#eff5f2" />
+        <g opacity="0.55">
+          <path d="M80 80H920M80 180H920M80 280H920M80 380H920M80 480H920" stroke="#c7d7d1" strokeWidth="1" />
+          <path d="M120 40V500M280 40V500M440 40V500M600 40V500M760 40V500M920 40V500" stroke="#c7d7d1" strokeWidth="1" />
+        </g>
+        {features.slice().reverse().map((feature) => {
+          const isSelected = selectedFeature?.properties.id === feature.properties.id;
+          const stroke = colorForGroup(feature.properties.group);
+
+          return (
+            <path
+              key={feature.properties.id}
+              d={geometryPath(feature.geometry, bbox)}
+              fill="none"
+              stroke={stroke}
+              strokeWidth={isSelected ? 4.5 : widthForAmount(feature.properties.estimatedConstruction)}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={isSelected ? 1 : 0.58}
+              className="cursor-pointer transition hover:opacity-100"
+              onClick={() => onSelect(feature)}
+            >
+              <title>{`${feature.properties.corridor} in ${feature.properties.county}: ${feature.properties.work}`}</title>
+            </path>
+          );
+        })}
+      </svg>
+      <div className="flex flex-wrap items-center gap-3 border-t bg-white px-3 py-2 text-xs text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2 w-5 rounded-full bg-emerald-700" /> 8-county MPO
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2 w-5 rounded-full bg-cyan-700" /> 5 non-MPO counties
+        </span>
+        <span>Line width reflects estimated construction cost.</span>
+      </div>
+    </div>
+  );
+}
+
+function MapDetails({ feature }: { feature: MapFeature | null }) {
+  if (!feature) {
+    return (
+      <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
+        Select a mapped line to view project details.
+      </div>
+    );
+  }
+
+  const properties = feature.properties;
+
+  return (
+    <div className="rounded-lg border bg-white p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-medium uppercase text-muted-foreground">Selected project</p>
+          <h3 className="mt-1 text-xl font-semibold tracking-normal">{properties.corridor}</h3>
+        </div>
+        <Badge variant={properties.group === "8-county MPO" ? "default" : "secondary"} className="rounded-md">
+          {properties.group}
+        </Badge>
+      </div>
+      <dl className="mt-4 grid gap-3 text-sm">
+        <DetailRow label="County" value={properties.county} />
+        <DetailRow label="District" value={properties.district} />
+        <DetailRow label="CSJ" value={properties.csj} />
+        <DetailRow label="Limits" value={`${properties.from || "Unknown"} to ${properties.to || "Unknown"}`} />
+        <DetailRow label="Work" value={properties.work || properties.projectClass || "Unspecified"} />
+        <DetailRow label="Phase" value={properties.phase || properties.stage || "Unspecified"} />
+        <DetailRow label="Fiscal year" value={String(properties.fiscalYear || "Unknown")} />
+        <DetailRow label="Funding" value={properties.primaryCategory || "Unspecified"} />
+        <DetailRow label="Estimated construction" value={formatDollars(properties.estimatedConstruction)} />
+      </dl>
+    </div>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid gap-1 border-b pb-2 last:border-0 last:pb-0">
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="leading-5">{value}</dd>
+    </div>
+  );
+}
+
+function geometryPath(geometry: MapFeature["geometry"], bbox: [number, number, number, number]) {
+  const lines =
+    geometry.type === "LineString"
+      ? [geometry.coordinates as number[][]]
+      : (geometry.coordinates as number[][][]);
+
+  return lines
+    .map((line) =>
+      line
+        .map(([x, y], index) => {
+          const [screenX, screenY] = projectPoint(x, y, bbox);
+          return `${index === 0 ? "M" : "L"}${screenX.toFixed(1)} ${screenY.toFixed(1)}`;
+        })
+        .join(" "),
+    )
+    .join(" ");
+}
+
+function projectPoint(x: number, y: number, bbox: [number, number, number, number]) {
+  const [minX, minY, maxX, maxY] = bbox;
+  const padding = 28;
+  const width = 1000 - padding * 2;
+  const height = 520 - padding * 2;
+  const projectedX = padding + ((x - minX) / (maxX - minX || 1)) * width;
+  const projectedY = padding + (1 - (y - minY) / (maxY - minY || 1)) * height;
+
+  return [projectedX, projectedY];
+}
+
+function colorForGroup(group: RegionGroup) {
+  return group === "8-county MPO" ? "#047857" : "#0e7490";
+}
+
+function widthForAmount(amount: number) {
+  if (amount >= 500_000_000) {
+    return 3.4;
+  }
+  if (amount >= 100_000_000) {
+    return 2.6;
+  }
+  if (amount >= 25_000_000) {
+    return 2;
+  }
+  return 1.3;
+}
+
+function formatDollars(amount: number) {
+  if (!amount) {
+    return "Unknown";
+  }
+
+  if (amount >= 1_000_000_000) {
+    return `$${(amount / 1_000_000_000).toFixed(2)}B`;
+  }
+
+  return `$${(amount / 1_000_000).toFixed(1)}M`;
 }
