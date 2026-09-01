@@ -296,7 +296,7 @@ export default function Home() {
           });
 
           const map = new Map({
-            basemap: "streets-vector",
+            basemap: "gray-vector",
             layers: [layer],
           });
 
