@@ -1,15 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import {
-  BarChart3,
-  Bot,
-  Database,
-  Filter,
-  MapPinned,
-  Search,
-  TableProperties,
-} from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ExternalLink, Filter, Layers, MapPinned, Search } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,69 +13,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
-type RegionGroup = "8-county MPO" | "5-county non-MPO";
+const TXDOT_LAYER_URL =
+  "https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/TxDOT_Projects_Info/FeatureServer/0";
 
-type Project = {
-  csj: string;
-  county: string;
-  district: string;
-  corridor: string;
-  description: string;
-  category: string;
-  tier: "Tier 1" | "Tier 2";
-  fiscalYear: number;
-  amount: number;
-  group: RegionGroup;
-  status: "RTP match" | "Possible RTP match" | "Needs review";
-};
-
-type MapFeature = {
-  type: "Feature";
-  geometry: {
-    type: "LineString" | "MultiLineString";
-    coordinates: number[][] | number[][][];
-  };
-  properties: {
-    uniqueId: string;
-    id: string;
-    csj: string;
-    county: string;
-    district: string;
-    corridor: string;
-    from: string;
-    to: string;
-    work: string;
-    projectClass: string;
-    stage: string;
-    status: string;
-    phase: string;
-    fiscalYear: number;
-    estimatedConstruction: number;
-    primaryCategory: string;
-    group: RegionGroup;
-  };
-};
-
-type MapData = {
-  type: "FeatureCollection";
-  bbox: [number, number, number, number];
-  features: MapFeature[];
-  metadata: {
-    featureCount: number;
-    generatedAt: string;
-  };
-};
-
-const counties = [
+const hgacCounties = [
   "Austin",
   "Brazoria",
   "Chambers",
@@ -99,360 +33,312 @@ const counties = [
   "Wharton",
 ];
 
-const projects: Project[] = [
-  {
-    csj: "0912-72-652",
-    county: "Harris",
-    district: "Houston",
-    corridor: "I-45",
-    description: "North Houston corridor reconstruction and downtown system improvements",
-    category: "Category 12",
-    tier: "Tier 1",
-    fiscalYear: 2028,
-    amount: 1850,
-    group: "8-county MPO",
-    status: "RTP match",
-  },
-  {
-    csj: "0271-04-070",
-    county: "Waller",
-    district: "Houston",
-    corridor: "I-10",
-    description: "I-10 west capacity and managed-lane development toward FM 359",
-    category: "Category 2",
-    tier: "Tier 1",
-    fiscalYear: 2030,
-    amount: 720,
-    group: "8-county MPO",
-    status: "Possible RTP match",
-  },
-  {
-    csj: "0027-13-200",
-    county: "Fort Bend",
-    district: "Houston",
-    corridor: "I-69 / US 59",
-    description: "Suburban corridor modernization and interchange reconstruction",
-    category: "Category 4",
-    tier: "Tier 1",
-    fiscalYear: 2031,
-    amount: 610,
-    group: "8-county MPO",
-    status: "RTP match",
-  },
-  {
-    csj: "0598-02-119",
-    county: "Brazoria",
-    district: "Houston",
-    corridor: "SH 288",
-    description: "South regional mobility, frontage road, and access improvements",
-    category: "Category 7",
-    tier: "Tier 2",
-    fiscalYear: 2033,
-    amount: 390,
-    group: "8-county MPO",
-    status: "Possible RTP match",
-  },
-  {
-    csj: "0500-04-145",
-    county: "Galveston",
-    district: "Houston",
-    corridor: "I-45",
-    description: "Gulf Freeway resiliency, evacuation access, and bottleneck relief",
-    category: "Category 12",
-    tier: "Tier 1",
-    fiscalYear: 2029,
-    amount: 540,
-    group: "8-county MPO",
-    status: "RTP match",
-  },
-  {
-    csj: "0739-02-164",
-    county: "Montgomery",
-    district: "Houston",
-    corridor: "SH 105",
-    description: "East-west connectivity and safety improvements near Conroe",
-    category: "Category 4",
-    tier: "Tier 2",
-    fiscalYear: 2032,
-    amount: 260,
-    group: "8-county MPO",
-    status: "Needs review",
-  },
-  {
-    csj: "0508-01-377",
-    county: "Chambers",
-    district: "Beaumont",
-    corridor: "I-10",
-    description: "Regional freight connectivity and interstate capacity improvements",
-    category: "Category 4",
-    tier: "Tier 1",
-    fiscalYear: 2028,
-    amount: 430,
-    group: "8-county MPO",
-    status: "Possible RTP match",
-  },
-  {
-    csj: "1051-02-041",
-    county: "Liberty",
-    district: "Beaumont",
-    corridor: "SH 99 / US 90",
-    description: "Outer-area connectivity, safety, and growth-response improvements",
-    category: "Category 8",
-    tier: "Tier 2",
-    fiscalYear: 2034,
-    amount: 180,
-    group: "8-county MPO",
-    status: "Needs review",
-  },
-  {
-    csj: "0177-03-096",
-    county: "Walker",
-    district: "Bryan",
-    corridor: "I-45",
-    description: "Rural interstate preservation, safety, and north-south mobility",
-    category: "Category 1",
-    tier: "Tier 1",
-    fiscalYear: 2027,
-    amount: 210,
-    group: "5-county non-MPO",
-    status: "Needs review",
-  },
-  {
-    csj: "0089-05-082",
-    county: "Wharton",
-    district: "Yoakum",
-    corridor: "US 59 / I-69",
-    description: "Freight corridor upgrade and future interstate connectivity",
-    category: "Category 4",
-    tier: "Tier 2",
-    fiscalYear: 2035,
-    amount: 330,
-    group: "5-county non-MPO",
-    status: "Possible RTP match",
-  },
-  {
-    csj: "0188-02-044",
-    county: "Matagorda",
-    district: "Yoakum",
-    corridor: "SH 35",
-    description: "Coastal connectivity, port access, and evacuation route reliability",
-    category: "Category 10",
-    tier: "Tier 2",
-    fiscalYear: 2033,
-    amount: 145,
-    group: "5-county non-MPO",
-    status: "Needs review",
-  },
-  {
-    csj: "0266-03-112",
-    county: "Colorado",
-    district: "Yoakum",
-    corridor: "I-10",
-    description: "Rural interstate preservation and freight movement improvements",
-    category: "Category 1",
-    tier: "Tier 1",
-    fiscalYear: 2029,
-    amount: 190,
-    group: "5-county non-MPO",
-    status: "Needs review",
-  },
-  {
-    csj: "0271-01-088",
-    county: "Austin",
-    district: "Yoakum",
-    corridor: "I-10 / US 90",
-    description: "System preservation and rural safety improvements west of Houston",
-    category: "Category 8",
-    tier: "Tier 2",
-    fiscalYear: 2031,
-    amount: 115,
-    group: "5-county non-MPO",
-    status: "Needs review",
-  },
+const phaseOptions = [
+  "All phases",
+  "Construction Underway or Begins Soon",
+  "Construction begins within 4 years",
+  "Construction begins in 5 to 10 years",
+  "Planning, 10+ years",
+  "Feasibility Studies",
 ];
 
-const regionOptions = ["All H-GAC", "8-county MPO", "5-county non-MPO"];
-const categoryOptions = ["All categories", ...Array.from(new Set(projects.map((project) => project.category)))];
-const corridorOptions = ["All corridors", ...Array.from(new Set(projects.map((project) => project.corridor)))];
+const colorByPhase: Record<string, [number, number, number, number]> = {
+  "Construction Underway or Begins Soon": [214, 26, 29, 0.9],
+  "Construction begins within 4 years": [232, 126, 35, 0.9],
+  "Construction begins in 5 to 10 years": [18, 133, 118, 0.9],
+  "Planning, 10+ years": [82, 99, 125, 0.85],
+  "Feasibility Studies": [0, 92, 230, 0.9],
+};
 
-const money = new Intl.NumberFormat("en-US", {
+type Summary = {
+  count: number;
+  totalCost: number;
+  counties: string[];
+  corridors: string[];
+  lastUpdated: string | null;
+};
+
+type ArcGisFeatureAttributes = {
+  COUNTY_NAME?: string;
+  HIGHWAY_NUMBER?: string;
+  HWY_NBR?: string;
+  PT_PHASE?: string;
+  EST_CONSTRUCTION_COST?: number;
+  LAST_PROJ_UPDATE_DT?: number;
+};
+
+type QueryResponse = {
+  features?: Array<{ attributes: ArcGisFeatureAttributes }>;
+};
+
+type ArcGisApi = {
+  Map: new (args: Record<string, unknown>) => unknown;
+  MapView: new (args: Record<string, unknown>) => {
+    ui: { add: (widget: unknown, position: string) => void };
+    when: () => Promise<void>;
+    destroy: () => void;
+  };
+  FeatureLayer: new (args: Record<string, unknown>) => {
+    definitionExpression: string;
+    refresh: () => void;
+    queryExtent: () => Promise<{ extent?: unknown }>;
+    queryFeatures: (query: Record<string, unknown>) => Promise<QueryResponse>;
+  };
+  Legend: new (args: Record<string, unknown>) => unknown;
+  Expand: new (args: Record<string, unknown>) => unknown;
+};
+
+declare global {
+  interface Window {
+    require?: (modules: string[], callback: (...args: any[]) => void) => void;
+  }
+}
+
+const countyWhere = `COUNTY_NAME IN (${hgacCounties.map((county) => `'${county}'`).join(",")})`;
+const baseWhere = `PRJ_UTP = 1 AND ${countyWhere}`;
+
+const currency = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 1,
   minimumFractionDigits: 0,
 });
 
-function formatMoney(amount: number) {
-  return `$${money.format(amount)}M`;
+function formatCurrency(value: number) {
+  if (value >= 1_000_000_000) {
+    return `$${currency.format(value / 1_000_000_000)}B`;
+  }
+
+  return `$${currency.format(value / 1_000_000)}M`;
 }
 
-function totalAmount(records: Project[]) {
-  return records.reduce((sum, project) => sum + project.amount, 0);
+function buildDefinition(county: string, phase: string, search: string) {
+  const clauses = [baseWhere];
+
+  if (county !== "All counties") {
+    clauses.push(`COUNTY_NAME = '${county.replaceAll("'", "''")}'`);
+  }
+
+  if (phase !== "All phases") {
+    clauses.push(`PT_PHASE = '${phase.replaceAll("'", "''")}'`);
+  }
+
+  const trimmed = search.trim().replaceAll("'", "''").toUpperCase();
+  if (trimmed) {
+    clauses.push(
+      `(UPPER(HIGHWAY_NUMBER) LIKE '%${trimmed}%' OR UPPER(HWY_NBR) LIKE '%${trimmed}%' OR UPPER(CONTROL_SECT_JOB) LIKE '%${trimmed}%' OR UPPER(TYPE_OF_WORK) LIKE '%${trimmed}%' OR UPPER(LIMITS_FROM) LIKE '%${trimmed}%' OR UPPER(LIMITS_TO) LIKE '%${trimmed}%')`,
+    );
+  }
+
+  return clauses.join(" AND ");
 }
 
-function groupTotals(records: Project[], key: keyof Pick<Project, "county" | "category" | "corridor">) {
-  return Object.entries(
-    records.reduce<Record<string, number>>((acc, project) => {
-      acc[project[key]] = (acc[project[key]] ?? 0) + project.amount;
-      return acc;
-    }, {}),
-  )
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 6);
+function arcgisRenderer() {
+  return {
+    type: "unique-value",
+    field: "PT_PHASE",
+    defaultSymbol: {
+      type: "simple-line",
+      color: [55, 65, 81, 0.75],
+      width: 2.5,
+    },
+    uniqueValueInfos: Object.entries(colorByPhase).map(([value, color]) => ({
+      value,
+      label: value,
+      symbol: {
+        type: "simple-line",
+        color,
+        width: 4,
+      },
+    })),
+  };
 }
 
 export default function Home() {
-  const [region, setRegion] = useState(regionOptions[0]);
+  const mapRef = useRef<HTMLDivElement | null>(null);
+  const layerRef = useRef<ArcGisApi["FeatureLayer"] | null>(null);
+  const viewRef = useRef<ReturnType<ArcGisApi["MapView"]> | null>(null);
   const [county, setCounty] = useState("All counties");
-  const [category, setCategory] = useState(categoryOptions[0]);
-  const [corridor, setCorridor] = useState(corridorOptions[0]);
-  const [query, setQuery] = useState("");
-  const [mapData, setMapData] = useState<MapData | null>(null);
-  const [selectedFeature, setSelectedFeature] = useState<MapFeature | null>(null);
+  const [phase, setPhase] = useState("All phases");
+  const [search, setSearch] = useState("");
+  const [summary, setSummary] = useState<Summary>({
+    count: 0,
+    totalCost: 0,
+    counties: [],
+    corridors: [],
+    lastUpdated: null,
+  });
+  const [mapStatus, setMapStatus] = useState("Loading TxDOT AGO layer");
+
+  const definitionExpression = useMemo(
+    () => buildDefinition(county, phase, search),
+    [county, phase, search],
+  );
 
   useEffect(() => {
-    fetch("/data/hgac-projects.geojson")
-      .then((response) => response.json())
-      .then((data: MapData) => {
-        setMapData(data);
-        setSelectedFeature(data.features[0] ?? null);
-      })
-      .catch(() => setMapData(null));
-  }, []);
+    const stylesheetId = "arcgis-maps-sdk-css";
+    const scriptId = "arcgis-maps-sdk-js";
 
-  const filteredProjects = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-
-    return projects.filter((project) => {
-      const regionMatch = region === "All H-GAC" || project.group === region;
-      const countyMatch = county === "All counties" || project.county === county;
-      const categoryMatch = category === "All categories" || project.category === category;
-      const corridorMatch = corridor === "All corridors" || project.corridor === corridor;
-      const queryMatch =
-        normalizedQuery.length === 0 ||
-        [
-          project.csj,
-          project.county,
-          project.district,
-          project.corridor,
-          project.description,
-          project.category,
-          project.status,
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(normalizedQuery);
-
-      return regionMatch && countyMatch && categoryMatch && corridorMatch && queryMatch;
-    });
-  }, [category, corridor, county, query, region]);
-
-  const filteredMapFeatures = useMemo(() => {
-    if (!mapData) {
-      return [];
+    if (!document.getElementById(stylesheetId)) {
+      const link = document.createElement("link");
+      link.id = stylesheetId;
+      link.rel = "stylesheet";
+      link.href = "https://js.arcgis.com/4.33/esri/themes/light/main.css";
+      document.head.appendChild(link);
     }
 
-    const normalizedQuery = query.trim().toLowerCase();
-
-    return mapData.features.filter((feature) => {
-      const properties = feature.properties;
-      const regionMatch = region === "All H-GAC" || properties.group === region;
-      const countyMatch = county === "All counties" || properties.county === county;
-      const categoryMatch =
-        category === "All categories" || properties.primaryCategory.includes(category.replace("Category ", ""));
-      const corridorMatch = corridor === "All corridors" || properties.corridor === corridor;
-      const queryMatch =
-        normalizedQuery.length === 0 ||
+    const loadMap = () => {
+      window.require?.(
         [
-          properties.csj,
-          properties.county,
-          properties.district,
-          properties.corridor,
-          properties.from,
-          properties.to,
-          properties.work,
-          properties.projectClass,
-          properties.primaryCategory,
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(normalizedQuery);
+          "esri/Map",
+          "esri/views/MapView",
+          "esri/layers/FeatureLayer",
+          "esri/widgets/Legend",
+          "esri/widgets/Expand",
+        ],
+        (Map, MapView, FeatureLayer, Legend, Expand) => {
+          if (!mapRef.current || viewRef.current) {
+            return;
+          }
 
-      return regionMatch && countyMatch && categoryMatch && corridorMatch && queryMatch;
-    });
-  }, [category, corridor, county, mapData, query, region]);
+          const layer = new FeatureLayer({
+            url: TXDOT_LAYER_URL,
+            title: "TxDOT UTP Projects",
+            outFields: ["*"],
+            definitionExpression,
+            renderer: arcgisRenderer(),
+            popupTemplate: {
+              title: "{HIGHWAY_NUMBER} in {COUNTY_NAME} County",
+              content: [
+                {
+                  type: "fields",
+                  fieldInfos: [
+                    { fieldName: "CONTROL_SECT_JOB", label: "CSJ" },
+                    { fieldName: "TYPE_OF_WORK", label: "Type of work" },
+                    { fieldName: "LIMITS_FROM", label: "From" },
+                    { fieldName: "LIMITS_TO", label: "To" },
+                    { fieldName: "PT_PHASE", label: "Project timing" },
+                    { fieldName: "ESTMTD_FISCAL_YR", label: "Estimated fiscal year" },
+                    {
+                      fieldName: "EST_CONSTRUCTION_COST",
+                      label: "Estimated construction cost",
+                      format: { digitSeparator: true, places: 0 },
+                    },
+                    { fieldName: "DISTRICT_NAME", label: "TxDOT district" },
+                    { fieldName: "MPO_NM", label: "MPO" },
+                  ],
+                },
+              ],
+            },
+          });
 
-  const allTotal = totalAmount(projects);
-  const filteredTotal = totalAmount(filteredProjects);
-  const mpoTotal = totalAmount(filteredProjects.filter((project) => project.group === "8-county MPO"));
-  const nonMpoTotal = totalAmount(filteredProjects.filter((project) => project.group === "5-county non-MPO"));
-  const tierOneCount = filteredProjects.filter((project) => project.tier === "Tier 1").length;
-  const firstFourYears = filteredProjects.filter((project) => project.fiscalYear <= 2030).length;
-  const countyTotals = groupTotals(filteredProjects, "county");
-  const categoryTotals = groupTotals(filteredProjects, "category");
-  const corridorTotals = groupTotals(filteredProjects, "corridor");
-  const maxCounty = Math.max(...countyTotals.map(([, amount]) => amount), 1);
+          const map = new Map({
+            basemap: "streets-vector",
+            layers: [layer],
+          });
+
+          const view = new MapView({
+            container: mapRef.current,
+            map,
+            center: [-95.35, 29.75],
+            zoom: 8,
+            constraints: {
+              minZoom: 6,
+            },
+          });
+
+          const legend = new Legend({ view, layerInfos: [{ layer, title: "UTP project timing" }] });
+          const expand = new Expand({
+            view,
+            content: legend,
+            expanded: false,
+            expandTooltip: "Show legend",
+          });
+
+          view.ui.add(expand, "bottom-left");
+          layerRef.current = layer;
+          viewRef.current = view;
+
+          view
+            .when()
+            .then(() => {
+              setMapStatus("Live TxDOT AGO layer loaded");
+              refreshLayerSummary(layer, definitionExpression, setSummary);
+              zoomToLayer(layer, view, definitionExpression);
+            })
+            .catch(() => setMapStatus("The TxDOT AGO layer could not be loaded"));
+        },
+      );
+    };
+
+    if (window.require) {
+      loadMap();
+    } else if (!document.getElementById(scriptId)) {
+      const script = document.createElement("script");
+      script.id = scriptId;
+      script.src = "https://js.arcgis.com/4.33/";
+      script.async = true;
+      script.onload = loadMap;
+      document.body.appendChild(script);
+    }
+
+    return () => {
+      viewRef.current?.destroy();
+      viewRef.current = null;
+      layerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const layer = layerRef.current;
+    const view = viewRef.current;
+    if (!layer || !view) {
+      return;
+    }
+
+    layer.definitionExpression = definitionExpression;
+    layer.refresh();
+    refreshLayerSummary(layer, definitionExpression, setSummary);
+    zoomToLayer(layer, view, definitionExpression);
+  }, [definitionExpression]);
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <section className="border-b bg-[linear-gradient(180deg,#f8fafc_0%,#edf4ef_100%)]">
-        <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-5 sm:px-6 lg:px-8">
+    <main className="flex min-h-screen flex-col bg-background text-foreground">
+      <header className="border-b bg-white">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                 <Badge variant="outline" className="rounded-md border-emerald-200 bg-emerald-50 text-emerald-800">
-                  2027 UTP
+                  Live TxDOT AGO layer
                 </Badge>
-                <span>H-GAC Regional Transportation Investment Tool</span>
+                <span>Filtered to PRJ_UTP = 1</span>
               </div>
-              <h1 className="mt-3 text-3xl font-semibold tracking-normal text-slate-950 sm:text-4xl">
-                UTP Explorer
+              <h1 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950">
+                H-GAC UTP Project Map
               </h1>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-700 sm:text-base">
-                Explore how the Unified Transportation Program affects the 8-county MPO,
-                the five non-MPO H-GAC counties, and the full 13-county region.
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-700">
+                View Unified Transportation Program projects from TxDOT Project Info for the 13-county H-GAC region.
               </p>
             </div>
-            <div className="grid grid-cols-3 gap-2 rounded-lg border bg-white p-2 shadow-sm">
-              <div className="px-3 py-2">
-                <p className="text-xs text-muted-foreground">Statewide headline</p>
-                <p className="text-lg font-semibold">$138B</p>
-              </div>
-              <div className="border-l px-3 py-2">
-                <p className="text-xs text-muted-foreground">UTP program</p>
-                <p className="text-lg font-semibold">$95B</p>
-              </div>
-              <div className="border-l px-3 py-2">
-                <p className="text-xs text-muted-foreground">Sample loaded</p>
-                <p className="text-lg font-semibold">{formatMoney(allTotal)}</p>
-              </div>
-            </div>
+            <a
+              href={`${TXDOT_LAYER_URL}/query?outFields=*&where=1%3D1`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-medium transition hover:bg-muted"
+            >
+              Source layer <ExternalLink className="size-4" />
+            </a>
           </div>
 
-          <div className="grid gap-3 rounded-lg border bg-white p-3 shadow-sm lg:grid-cols-[1fr_1fr_1fr_1.3fr_auto]">
-            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-              Geography
-              <Select value={region} onValueChange={setRegion}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {regionOptions.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      {option}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </label>
-
+          <section className="grid gap-3 rounded-lg border bg-slate-50 p-3 lg:grid-cols-[1fr_1fr_1.4fr_auto]">
             <label className="grid gap-1 text-xs font-medium text-muted-foreground">
               County
               <Select value={county} onValueChange={setCounty}>
-                <SelectTrigger className="w-full">
+                <SelectTrigger className="w-full bg-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="All counties">All counties</SelectItem>
-                  {counties.map((option) => (
+                  {hgacCounties.map((option) => (
                     <SelectItem key={option} value={option}>
                       {option}
                     </SelectItem>
@@ -462,13 +348,13 @@ export default function Home() {
             </label>
 
             <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-              Funding
-              <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger className="w-full">
+              Timing
+              <Select value={phase} onValueChange={setPhase}>
+                <SelectTrigger className="w-full bg-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {categoryOptions.map((option) => (
+                  {phaseOptions.map((option) => (
                     <SelectItem key={option} value={option}>
                       {option}
                     </SelectItem>
@@ -478,243 +364,98 @@ export default function Home() {
             </label>
 
             <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-              Corridor
-              <Select value={corridor} onValueChange={setCorridor}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {corridorOptions.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      {option}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              Search
+              <span className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Highway, CSJ, limits, or work type"
+                  className="bg-white pl-8"
+                />
+              </span>
             </label>
 
             <Button
               type="button"
               variant="outline"
-              className="self-end"
+              className="self-end bg-white"
               onClick={() => {
-                setRegion("All H-GAC");
                 setCounty("All counties");
-                setCategory("All categories");
-                setCorridor("All corridors");
-                setQuery("");
+                setPhase("All phases");
+                setSearch("");
               }}
             >
               <Filter /> Reset
             </Button>
-          </div>
-        </div>
-      </section>
-
-      <section className="mx-auto grid max-w-7xl gap-5 px-4 py-5 sm:px-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-8">
-        <div className="grid gap-5">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <MetricCard label="Filtered investment" value={formatMoney(filteredTotal)} detail={`${filteredProjects.length} projects in view`} />
-            <MetricCard label="8-county MPO" value={formatMoney(mpoTotal)} detail="Metropolitan planning area" />
-            <MetricCard label="5 non-MPO counties" value={formatMoney(nonMpoTotal)} detail="Rural and regional program context" />
-            <MetricCard label="Near-term projects" value={`${firstFourYears}`} detail={`${tierOneCount} Tier 1 projects`} />
-          </div>
-
-          <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
-            <section className="rounded-lg border bg-card p-4 shadow-sm xl:col-span-2">
-              <div className="mb-4 flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <h2 className="flex items-center gap-2 text-base font-semibold">
-                    <MapPinned className="size-4 text-cyan-700" /> Interactive Project Map
-                  </h2>
-                  <p className="text-sm text-muted-foreground">
-                    TxDOT GIS layer filtered to the 13 H-GAC counties.
-                  </p>
-                </div>
-                <Badge variant="outline" className="w-fit rounded-md">
-                  {mapData ? `${filteredMapFeatures.length.toLocaleString()} of ${mapData.metadata.featureCount.toLocaleString()} features` : "Loading layer"}
-                </Badge>
-              </div>
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-                <ProjectMap
-                  bbox={mapData?.bbox ?? null}
-                  features={filteredMapFeatures}
-                  selectedFeature={selectedFeature}
-                  onSelect={setSelectedFeature}
-                />
-                <MapDetails feature={selectedFeature} />
-              </div>
-            </section>
-
-            <section className="rounded-lg border bg-card p-4 shadow-sm">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="flex items-center gap-2 text-base font-semibold">
-                    <BarChart3 className="size-4 text-emerald-700" /> County Investment
-                  </h2>
-                  <p className="text-sm text-muted-foreground">Top counties in the active filter.</p>
-                </div>
-                <Badge variant="secondary" className="rounded-md">
-                  Preliminary
-                </Badge>
-              </div>
-              <div className="space-y-3">
-                {countyTotals.map(([name, amount]) => (
-                  <div key={name}>
-                    <div className="mb-1 flex items-center justify-between text-sm">
-                      <span className="font-medium">{name}</span>
-                      <span className="text-muted-foreground">{formatMoney(amount)}</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-muted">
-                      <div
-                        className="h-2 rounded-full bg-emerald-700"
-                        style={{ width: `${Math.max((amount / maxCounty) * 100, 4)}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="rounded-lg border bg-card p-4 shadow-sm">
-              <h2 className="flex items-center gap-2 text-base font-semibold">
-                <MapPinned className="size-4 text-cyan-700" /> Corridor Snapshot
-              </h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Corridors are grouped from the project list so staff can think beyond county lines.
-              </p>
-              <div className="mt-4 grid gap-2">
-                {corridorTotals.map(([name, amount]) => (
-                  <div key={name} className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2">
-                    <span className="text-sm font-medium">{name}</span>
-                    <span className="text-sm text-muted-foreground">{formatMoney(amount)}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </div>
-
-          <section className="rounded-lg border bg-card p-4 shadow-sm">
-            <div className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h2 className="flex items-center gap-2 text-base font-semibold">
-                  <TableProperties className="size-4 text-slate-700" /> Project Explorer
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  Search CSJ, county, corridor, category, or description.
-                </p>
-              </div>
-              <label className="relative block lg:w-80">
-                <Search className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground" />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search projects"
-                  className="pl-8"
-                />
-              </label>
-            </div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>CSJ</TableHead>
-                  <TableHead>County</TableHead>
-                  <TableHead>Corridor</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Funding</TableHead>
-                  <TableHead>FY</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredProjects.map((project) => (
-                  <TableRow key={project.csj}>
-                    <TableCell className="font-mono text-xs">{project.csj}</TableCell>
-                    <TableCell>{project.county}</TableCell>
-                    <TableCell className="font-medium">{project.corridor}</TableCell>
-                    <TableCell className="max-w-[320px] whitespace-normal text-muted-foreground">
-                      {project.description}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        <Badge variant="outline" className="rounded-md">
-                          {project.category}
-                        </Badge>
-                        <Badge variant={project.tier === "Tier 1" ? "default" : "secondary"} className="rounded-md">
-                          {project.tier}
-                        </Badge>
-                      </div>
-                    </TableCell>
-                    <TableCell>{project.fiscalYear}</TableCell>
-                    <TableCell className="text-right font-semibold">{formatMoney(project.amount)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
           </section>
         </div>
+      </header>
 
-        <aside className="grid gap-5 self-start">
-          <section className="rounded-lg border bg-card p-4 shadow-sm">
+      <section className="mx-auto grid w-full max-w-7xl flex-1 gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:px-8">
+        <section className="min-h-[660px] overflow-hidden rounded-lg border bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b px-4 py-3">
             <h2 className="flex items-center gap-2 text-base font-semibold">
-              <Bot className="size-4 text-emerald-700" /> Ask the UTP
+              <MapPinned className="size-4 text-emerald-700" /> UTP Projects
             </h2>
-            <div className="mt-3 rounded-lg border bg-muted/30 p-3">
-              <p className="text-sm font-medium">Try: Compare MPO and non-MPO investment.</p>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                In this filtered sample, the 8-county MPO accounts for{" "}
-                <strong className="text-foreground">{formatMoney(mpoTotal)}</strong>, while the five
-                non-MPO counties account for{" "}
-                <strong className="text-foreground">{formatMoney(nonMpoTotal)}</strong>. The next build
-                will route numeric questions to the project table and policy questions to the UTP text.
-              </p>
+            <Badge variant="secondary" className="rounded-md">
+              {mapStatus}
+            </Badge>
+          </div>
+          <div ref={mapRef} className="h-[620px] w-full" />
+        </section>
+
+        <aside className="grid content-start gap-4">
+          <section className="rounded-lg border bg-white p-4 shadow-sm">
+            <h2 className="flex items-center gap-2 text-base font-semibold">
+              <Layers className="size-4 text-cyan-700" /> Current View
+            </h2>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <Metric label="UTP features" value={summary.count.toLocaleString()} />
+              <Metric label="Est. cost" value={formatCurrency(summary.totalCost)} />
             </div>
+            <p className="mt-3 text-xs leading-5 text-muted-foreground">
+              Counts and costs are queried from the TxDOT AGO layer using the active filters. This map intentionally excludes non-UTP records.
+            </p>
+          </section>
+
+          <section className="rounded-lg border bg-white p-4 shadow-sm">
+            <h2 className="text-base font-semibold">Counties In View</h2>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {summary.counties.slice(0, 13).map((item) => (
+                <Badge key={item} variant="outline" className="rounded-md">
+                  {item}
+                </Badge>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-lg border bg-white p-4 shadow-sm">
+            <h2 className="text-base font-semibold">Common Corridors</h2>
             <div className="mt-3 grid gap-2">
-              {["Which projects affect I-45?", "Explain Category 12.", "Show Chambers and Liberty projects."].map((prompt) => (
+              {summary.corridors.slice(0, 8).map((item) => (
                 <button
-                  key={prompt}
+                  key={item}
                   type="button"
                   className="rounded-md border px-3 py-2 text-left text-sm transition hover:bg-muted"
-                  onClick={() => setQuery(prompt.replace("Which projects affect ", "").replace("?", ""))}
+                  onClick={() => setSearch(item)}
                 >
-                  {prompt}
+                  {item}
                 </button>
               ))}
             </div>
           </section>
 
-          <section className="rounded-lg border bg-card p-4 shadow-sm">
-            <h2 className="flex items-center gap-2 text-base font-semibold">
-              <Database className="size-4 text-cyan-700" /> Data Readiness
-            </h2>
-            <div className="mt-4 space-y-3 text-sm">
-              {[
-                ["MVP schema", "Ready"],
-                ["2027 UTP Excel import", "Next"],
-                ["PDF source citations", "Next"],
-                ["RTP 2050 crosswalk", "Later"],
-                ["Map geometry", "Later"],
-              ].map(([label, status]) => (
-                <div key={label} className="flex items-center justify-between border-b pb-2 last:border-0 last:pb-0">
-                  <span>{label}</span>
-                  <Badge variant={status === "Ready" ? "default" : "secondary"} className="rounded-md">
-                    {status}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="rounded-lg border bg-card p-4 shadow-sm">
-            <h2 className="text-base font-semibold">Funding Categories</h2>
-            <div className="mt-3 grid gap-2">
-              {categoryTotals.map(([name, amount]) => (
-                <div key={name} className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-sm">
-                  <span>{name}</span>
-                  <span className="font-medium">{formatMoney(amount)}</span>
-                </div>
-              ))}
-            </div>
+          <section className="rounded-lg border bg-white p-4 shadow-sm">
+            <h2 className="text-base font-semibold">How To Use</h2>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              Pan or zoom the map, select a project line, and use the popup to review CSJ, limits, work type, timing, district, MPO, and estimated construction cost.
+            </p>
+            {summary.lastUpdated ? (
+              <p className="mt-3 text-xs text-muted-foreground">
+                Layer update: {summary.lastUpdated}
+              </p>
+            ) : null}
           </section>
         </aside>
       </section>
@@ -722,191 +463,78 @@ export default function Home() {
   );
 }
 
-function MetricCard({ label, value, detail }: { label: string; value: string; detail: string }) {
+function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <section className="rounded-lg border bg-card p-4 shadow-sm">
-      <p className="text-sm text-muted-foreground">{label}</p>
-      <p className="mt-2 text-2xl font-semibold tracking-normal">{value}</p>
-      <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
-    </section>
-  );
-}
-
-function ProjectMap({
-  bbox,
-  features,
-  selectedFeature,
-  onSelect,
-}: {
-  bbox: [number, number, number, number] | null;
-  features: MapFeature[];
-  selectedFeature: MapFeature | null;
-  onSelect: (feature: MapFeature) => void;
-}) {
-  if (!bbox) {
-    return (
-      <div className="grid min-h-[420px] place-items-center rounded-lg border bg-muted/30 text-sm text-muted-foreground">
-        Loading GIS layer
-      </div>
-    );
-  }
-
-  if (features.length === 0) {
-    return (
-      <div className="grid min-h-[420px] place-items-center rounded-lg border bg-muted/30 text-sm text-muted-foreground">
-        No mapped projects match the current filters.
-      </div>
-    );
-  }
-
-  return (
-    <div className="overflow-hidden rounded-lg border bg-[#eff5f2]">
-      <svg
-        role="img"
-        aria-label="Interactive map of H-GAC area TxDOT project features"
-        viewBox="0 0 1000 520"
-        className="h-[420px] w-full"
-      >
-        <rect width="1000" height="520" fill="#eff5f2" />
-        <g opacity="0.55">
-          <path d="M80 80H920M80 180H920M80 280H920M80 380H920M80 480H920" stroke="#c7d7d1" strokeWidth="1" />
-          <path d="M120 40V500M280 40V500M440 40V500M600 40V500M760 40V500M920 40V500" stroke="#c7d7d1" strokeWidth="1" />
-        </g>
-        {features.slice().reverse().map((feature) => {
-          const isSelected = selectedFeature?.properties.uniqueId === feature.properties.uniqueId;
-          const stroke = colorForGroup(feature.properties.group);
-
-          return (
-            <path
-              key={feature.properties.uniqueId}
-              d={geometryPath(feature.geometry, bbox)}
-              fill="none"
-              stroke={stroke}
-              strokeWidth={isSelected ? 4.5 : widthForAmount(feature.properties.estimatedConstruction)}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              opacity={isSelected ? 1 : 0.58}
-              className="cursor-pointer transition hover:opacity-100"
-              onClick={() => onSelect(feature)}
-            >
-              <title>{`${feature.properties.corridor} in ${feature.properties.county}: ${feature.properties.work}`}</title>
-            </path>
-          );
-        })}
-      </svg>
-      <div className="flex flex-wrap items-center gap-3 border-t bg-white px-3 py-2 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-2 w-5 rounded-full bg-emerald-700" /> 8-county MPO
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-2 w-5 rounded-full bg-cyan-700" /> 5 non-MPO counties
-        </span>
-        <span>Line width reflects estimated construction cost.</span>
-      </div>
+    <div className="rounded-lg border bg-muted/30 p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 text-xl font-semibold tracking-normal">{value}</p>
     </div>
   );
 }
 
-function MapDetails({ feature }: { feature: MapFeature | null }) {
-  if (!feature) {
-    return (
-      <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-        Select a mapped line to view project details.
-      </div>
-    );
-  }
+async function refreshLayerSummary(
+  layer: ArcGisApi["FeatureLayer"],
+  where: string,
+  setSummary: (summary: Summary) => void,
+) {
+  const response = await layer.queryFeatures({
+    where,
+    outFields: [
+      "COUNTY_NAME",
+      "HIGHWAY_NUMBER",
+      "HWY_NBR",
+      "EST_CONSTRUCTION_COST",
+      "LAST_PROJ_UPDATE_DT",
+    ],
+    returnGeometry: false,
+    num: 2000,
+  });
 
-  const properties = feature.properties;
-
-  return (
-    <div className="rounded-lg border bg-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase text-muted-foreground">Selected project</p>
-          <h3 className="mt-1 text-xl font-semibold tracking-normal">{properties.corridor}</h3>
-        </div>
-        <Badge variant={properties.group === "8-county MPO" ? "default" : "secondary"} className="rounded-md">
-          {properties.group}
-        </Badge>
-      </div>
-      <dl className="mt-4 grid gap-3 text-sm">
-        <DetailRow label="County" value={properties.county} />
-        <DetailRow label="District" value={properties.district} />
-        <DetailRow label="CSJ" value={properties.csj} />
-        <DetailRow label="Limits" value={`${properties.from || "Unknown"} to ${properties.to || "Unknown"}`} />
-        <DetailRow label="Work" value={properties.work || properties.projectClass || "Unspecified"} />
-        <DetailRow label="Phase" value={properties.phase || properties.stage || "Unspecified"} />
-        <DetailRow label="Fiscal year" value={String(properties.fiscalYear || "Unknown")} />
-        <DetailRow label="Funding" value={properties.primaryCategory || "Unspecified"} />
-        <DetailRow label="Estimated construction" value={formatDollars(properties.estimatedConstruction)} />
-      </dl>
-    </div>
+  const attributes = response.features?.map((feature) => feature.attributes) ?? [];
+  const counties = uniqueSorted(attributes.map((item) => item.COUNTY_NAME).filter(Boolean));
+  const corridors = topValues(
+    attributes.map((item) => item.HIGHWAY_NUMBER || item.HWY_NBR).filter(Boolean),
   );
-}
-
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid gap-1 border-b pb-2 last:border-0 last:pb-0">
-      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="leading-5">{value}</dd>
-    </div>
+  const totalCost = attributes.reduce(
+    (sum, item) => sum + Number(item.EST_CONSTRUCTION_COST ?? 0),
+    0,
   );
+  const latestUpdate = Math.max(
+    ...attributes.map((item) => Number(item.LAST_PROJ_UPDATE_DT ?? 0)),
+    0,
+  );
+
+  setSummary({
+    count: attributes.length,
+    totalCost,
+    counties,
+    corridors,
+    lastUpdated: latestUpdate ? new Date(latestUpdate).toLocaleDateString() : null,
+  });
 }
 
-function geometryPath(geometry: MapFeature["geometry"], bbox: [number, number, number, number]) {
-  const lines =
-    geometry.type === "LineString"
-      ? [geometry.coordinates as number[][]]
-      : (geometry.coordinates as number[][][]);
-
-  return lines
-    .map((line) =>
-      line
-        .map(([x, y], index) => {
-          const [screenX, screenY] = projectPoint(x, y, bbox);
-          return `${index === 0 ? "M" : "L"}${screenX.toFixed(1)} ${screenY.toFixed(1)}`;
-        })
-        .join(" "),
-    )
-    .join(" ");
+async function zoomToLayer(
+  layer: ArcGisApi["FeatureLayer"],
+  view: ReturnType<ArcGisApi["MapView"]>,
+  where: string,
+) {
+  const result = await layer.queryExtent({ where });
+  if (result.extent) {
+    (view as any).goTo(result.extent, { duration: 450 }).catch(() => undefined);
+  }
 }
 
-function projectPoint(x: number, y: number, bbox: [number, number, number, number]) {
-  const [minX, minY, maxX, maxY] = bbox;
-  const padding = 28;
-  const width = 1000 - padding * 2;
-  const height = 520 - padding * 2;
-  const projectedX = padding + ((x - minX) / (maxX - minX || 1)) * width;
-  const projectedY = padding + (1 - (y - minY) / (maxY - minY || 1)) * height;
-
-  return [projectedX, projectedY];
+function uniqueSorted(values: string[]) {
+  return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
 }
 
-function colorForGroup(group: RegionGroup) {
-  return group === "8-county MPO" ? "#047857" : "#0e7490";
-}
+function topValues(values: string[]) {
+  const counts = values.reduce<Record<string, number>>((acc, value) => {
+    acc[value] = (acc[value] ?? 0) + 1;
+    return acc;
+  }, {});
 
-function widthForAmount(amount: number) {
-  if (amount >= 500_000_000) {
-    return 3.4;
-  }
-  if (amount >= 100_000_000) {
-    return 2.6;
-  }
-  if (amount >= 25_000_000) {
-    return 2;
-  }
-  return 1.3;
-}
-
-function formatDollars(amount: number) {
-  if (!amount) {
-    return "Unknown";
-  }
-
-  if (amount >= 1_000_000_000) {
-    return `$${(amount / 1_000_000_000).toFixed(2)}B`;
-  }
-
-  return `$${(amount / 1_000_000).toFixed(1)}M`;
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([value]) => value);
 }
