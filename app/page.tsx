@@ -6,7 +6,6 @@ import {
   ExternalLink,
   Filter,
   Layers,
-  LocateFixed,
   MapPinned,
   Search,
   TableProperties,
@@ -31,93 +30,118 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const TXDOT_LAYER_URL =
-  "https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/TxDOT_Projects_Info/FeatureServer/0";
+import listedProjectsData from "@/lib/utp-2027-listed-projects.json";
+
+// The project list, filters, and stats below are all sourced from TxDOT's
+// official "2027 UTP - Listed Projects" document (see
+// scripts/build-utp-listed-projects.js for how lib/utp-2027-listed-projects.json
+// is generated). Map geometry comes from a standalone GeoJSON extracted from
+// TxDOT's and H-GAC's live GIS services (see scripts/build-project-geometry.js) -
+// there is no live GIS dependency at runtime.
+const listedProjects = listedProjectsData as ListedProject[];
+
+const UTP_DOCUMENT_URL = "https://ftp.txdot.gov/pub/txdot/get-involved/tpp/utp/2027utp.pdf";
+
+// Standalone GeoJSON extracted from TxDOT's and H-GAC's live GIS services by
+// scripts/build-project-geometry.js - see that script for how these are
+// generated and re-run it whenever lib/utp-2027-listed-projects.json changes.
+// The map no longer queries any live ArcGIS service at runtime.
+const PROJECT_GEOMETRY_URL = "/utp-2027-project-geometry.geojson";
+const COUNTY_BOUNDARY_GEOJSON_URL = "/hgac-county-boundaries.geojson";
 
 const hgacCounties = [
-  "Austin",
   "Brazoria",
   "Chambers",
-  "Colorado",
   "Fort Bend",
   "Galveston",
   "Harris",
   "Liberty",
-  "Matagorda",
   "Montgomery",
-  "Walker",
   "Waller",
-  "Wharton",
 ];
 
-const phaseOptions = [
-  "All phases",
-  "Construction Underway or Begins Soon",
-  "Construction begins within 4 years",
-  "Construction begins in 5 to 10 years",
-  "Planning, 10+ years",
-  "Feasibility Studies",
-];
+const timingRanges = uniqueSorted(listedProjects.map((project) => project.estLetDateRange));
+const timingOptions = ["All timing", ...timingRanges];
+const nearTermRange = timingRanges[0] ?? null;
 
-const colorByPhase: Record<string, [number, number, number, number]> = {
-  "Construction Underway or Begins Soon": [214, 26, 29, 0.9],
-  "Construction begins within 4 years": [232, 126, 35, 0.9],
-  "Construction begins in 5 to 10 years": [18, 133, 118, 0.9],
-  "Planning, 10+ years": [82, 99, 125, 0.85],
-  "Feasibility Studies": [0, 92, 230, 0.9],
+// Line color keyed on the document's own estLetDateRange field (the same
+// field the Timing filter uses), rather than a GIS-only phase attribute.
+// Colors are assigned by sorted order so this stays correct even if a future
+// UTP document introduces a different set of ranges.
+const TIMING_COLOR_PALETTE: Array<[number, number, number, number]> = [
+  [232, 126, 35, 0.9],
+  [18, 133, 118, 0.9],
+  [82, 99, 125, 0.9],
+  [0, 92, 230, 0.9],
+];
+const colorByTiming: Record<string, [number, number, number, number]> = Object.fromEntries(
+  timingRanges.map((range, index) => [range, TIMING_COLOR_PALETTE[index % TIMING_COLOR_PALETTE.length]]),
+);
+
+type ListedProject = {
+  district: string;
+  highway: string;
+  csj: string;
+  estLetDateRange: string;
+  county: string;
+  limitsFrom: string;
+  limitsTo: string;
+  utpAction: string;
+  estConstructionCost: number;
+  fundingCategory2: number;
+  fundingCategory4: number;
+  fundingCategory12: number;
 };
+
+// TxDOT organizes the UTP into 12 prescribed funding categories; only these
+// three ever have a nonzero amount among the H-GAC listed projects (source:
+// https://ftp.txdot.gov/pub/txdot/get-involved/tpp/utp/utp_funding_categories_descriptions.pdf).
+const fundingCategories = [
+  {
+    key: "fundingCategory2" as const,
+    name: "Category 2 - Metropolitan and Urban Corridor Projects",
+    description:
+      "Mobility and added-capacity projects on urban corridors to reduce congestion. Funds are allocated to each MPO by formula, and the MPO selects and scores the projects.",
+  },
+  {
+    key: "fundingCategory4" as const,
+    name: "Category 4 - Statewide Connectivity Corridor Projects",
+    description:
+      "Mobility on major state highway corridors connecting urban areas to the statewide network - the Texas Trunk System, National Highway System, seaports, border crossings, freight routes, and hurricane evacuation routes.",
+  },
+  {
+    key: "fundingCategory12" as const,
+    name: "Category 12 - Strategic Priority",
+    description:
+      "Discretionary funding for projects of special statewide importance - congestion, economic opportunity, energy access, border/port connectivity, military readiness, or emergency response - awarded directly by the Texas Transportation Commission.",
+  },
+];
+
+type ProjectRecord = ListedProject;
 
 type Summary = {
   count: number;
   totalCost: number;
-  mpoCost: number;
-  nonMpoCost: number;
   nearTermCount: number;
   counties: string[];
+  districts: string[];
   corridors: string[];
   countyTotals: Array<[string, number]>;
-  phaseTotals: Array<[string, number]>;
-  projects: ProjectRecord[];
-  lastUpdated: string | null;
+  timingTotals: Array<[string, number]>;
+  fundingCategoryTotals: Record<string, number>;
 };
 
-type ArcGisFeatureAttributes = {
-  OBJECTID?: number;
-  CONTROL_SECT_JOB?: string;
-  COUNTY_NAME?: string;
-  DISTRICT_NAME?: string;
-  HIGHWAY_NUMBER?: string;
-  HWY_NBR?: string;
-  LIMITS_FROM?: string;
-  LIMITS_TO?: string;
-  TYPE_OF_WORK?: string;
-  PROJ_CLASS?: string;
-  PROJ_STAT?: string;
-  PROJ_STG?: string;
-  PT_PHASE?: string;
-  ESTMTD_FISCAL_YR?: number;
-  EST_CONSTRUCTION_COST?: number;
-  LAST_PROJ_UPDATE_DT?: number;
-  MPO_NM?: string;
-  PROJ_ID?: string;
-};
-
-type ProjectRecord = {
-  objectId: number;
-  csj: string;
-  county: string;
-  district: string;
-  corridor: string;
-  limits: string;
-  work: string;
-  phase: string;
-  fiscalYear: number | null;
-  cost: number;
-  group: "8-county MPO" | "5-county non-MPO";
+// Properties on our own standalone GeoJSON features (see
+// scripts/build-project-geometry.js), not raw ArcGIS attributes.
+type ProjectGeometryProperties = {
+  csj?: string;
+  highway?: string;
+  county?: string;
+  estLetDateRange?: string;
 };
 
 type QueryResponse = {
-  features?: Array<{ attributes: ArcGisFeatureAttributes }>;
+  features?: Array<{ attributes: ProjectGeometryProperties }>;
 };
 
 type ArcGisApi = {
@@ -127,7 +151,7 @@ type ArcGisApi = {
     when: () => Promise<void>;
     destroy: () => void;
   };
-  FeatureLayer: new (args: Record<string, unknown>) => {
+  GeoJSONLayer: new (args: Record<string, unknown>) => {
     definitionExpression: string;
     refresh: () => void;
     queryExtent: (query?: Record<string, unknown>) => Promise<{ extent?: unknown }>;
@@ -135,6 +159,7 @@ type ArcGisApi = {
   };
   Legend: new (args: Record<string, unknown>) => unknown;
   Expand: new (args: Record<string, unknown>) => unknown;
+  Home: new (args: Record<string, unknown>) => unknown;
 };
 
 declare global {
@@ -142,19 +167,6 @@ declare global {
     require?: (modules: string[], callback: (...args: any[]) => void) => void;
   }
 }
-
-const countyWhere = `COUNTY_NAME IN (${hgacCounties.map((county) => `'${county}'`).join(",")})`;
-const baseWhere = `PRJ_UTP = 1 AND ${countyWhere}`;
-const mpoCounties = new Set([
-  "Brazoria",
-  "Chambers",
-  "Fort Bend",
-  "Galveston",
-  "Harris",
-  "Liberty",
-  "Montgomery",
-  "Waller",
-]);
 
 const currency = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 1,
@@ -169,37 +181,138 @@ function formatCurrency(value: number) {
   return `$${currency.format(value / 1_000_000)}M`;
 }
 
-function buildDefinition(county: string, phase: string, search: string) {
-  const clauses = [baseWhere];
+// The document's CSJ is formatted with dashes (e.g. "1024-01-077"); the GIS
+// layer's CONTROL_SECT_JOB field stores the same number without them.
+function toGisCsj(csj: string) {
+  return csj.replaceAll("-", "");
+}
 
-  if (county !== "All counties") {
-    clauses.push(`COUNTY_NAME = '${county.replaceAll("'", "''")}'`);
+function csjFromFeatureAttributes(attributes: ProjectGeometryProperties | undefined | null) {
+  return typeof attributes?.csj === "string" && attributes.csj ? attributes.csj : null;
+}
+
+function findListedProjectByCsj(csj: string | null) {
+  if (!csj) {
+    return null;
   }
+  const normalized = toGisCsj(csj);
+  return listedProjects.find((project) => toGisCsj(project.csj) === normalized) ?? null;
+}
 
-  if (phase !== "All phases") {
-    clauses.push(`PT_PHASE = '${phase.replaceAll("'", "''")}'`);
-  }
+// Popup content for the project layer is built from our own document data
+// (by looking up the clicked feature's csj) instead of the standalone
+// geometry file's minimal properties, so popups always show full detail
+// (funding categories, UTP action, etc.), not just the fields baked into
+// the geometry file for rendering/filtering.
+function buildProjectPopupHtml(project: ListedProject) {
+  const fundingRows = fundingCategories
+    .filter((category) => project[category.key] > 0)
+    .map(
+      (category) =>
+        `<div style="display:flex;justify-content:space-between;gap:12px;"><span>${category.name.split(" - ")[0]}</span><span>${formatCurrency(project[category.key])}</span></div>`,
+    )
+    .join("");
 
-  const trimmed = search.trim().replaceAll("'", "''").toUpperCase();
-  if (trimmed) {
-    clauses.push(
-      `(UPPER(HIGHWAY_NUMBER) LIKE '%${trimmed}%' OR UPPER(HWY_NBR) LIKE '%${trimmed}%' OR UPPER(CONTROL_SECT_JOB) LIKE '%${trimmed}%' OR UPPER(TYPE_OF_WORK) LIKE '%${trimmed}%' OR UPPER(LIMITS_FROM) LIKE '%${trimmed}%' OR UPPER(LIMITS_TO) LIKE '%${trimmed}%')`,
-    );
-  }
+  return `<div style="display:grid;gap:6px;font-size:13px;line-height:1.5;min-width:220px;">
+    <div><strong>CSJ:</strong> ${project.csj}</div>
+    <div><strong>District:</strong> ${project.district}</div>
+    <div><strong>Limits:</strong> ${project.limitsFrom} to ${project.limitsTo}</div>
+    <div><strong>UTP Action:</strong> ${project.utpAction}</div>
+    <div><strong>Est. Let Date Range:</strong> ${project.estLetDateRange}</div>
+    <div><strong>Est. Construction Cost:</strong> ${formatCurrency(project.estConstructionCost)}</div>
+    ${fundingRows ? `<div style="margin-top:2px;"><strong>Funding categories:</strong></div>${fundingRows}` : ""}
+  </div>`;
+}
 
-  return clauses.join(" AND ");
+function popupContent(event: { graphic?: { attributes?: ProjectGeometryProperties } }) {
+  const project = findListedProjectByCsj(csjFromFeatureAttributes(event.graphic?.attributes));
+  return project
+    ? buildProjectPopupHtml(project)
+    : "<p>No matching 2027 UTP listed project found for this feature.</p>";
+}
+
+function filterProjects(
+  projects: ListedProject[],
+  county: string,
+  timing: string,
+  search: string,
+  corridor: string | null,
+  fundingCategory: (typeof fundingCategories)[number]["key"] | "All categories",
+) {
+  const trimmed = search.trim().toLowerCase();
+
+  return projects.filter((project) => {
+    if (county !== "All counties" && project.county !== county) {
+      return false;
+    }
+
+    if (timing !== "All timing" && project.estLetDateRange !== timing) {
+      return false;
+    }
+
+    // Common Corridors buttons filter on the project (highway) field only,
+    // unlike the free-text search box below which matches several fields.
+    if (corridor && project.highway !== corridor) {
+      return false;
+    }
+
+    if (fundingCategory !== "All categories" && project[fundingCategory] <= 0) {
+      return false;
+    }
+
+    if (trimmed) {
+      const haystack =
+        `${project.highway} ${project.csj} ${project.limitsFrom} ${project.limitsTo} ${project.utpAction}`.toLowerCase();
+      if (!haystack.includes(trimmed)) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
+function buildSummary(projects: ListedProject[]): Summary {
+  const counties = uniqueSorted(projects.map((project) => project.county));
+  const districts = uniqueSorted(projects.map((project) => project.district).filter(Boolean));
+  const corridors = topValues(projects.map((project) => project.highway).filter(Boolean));
+  const totalCost = projects.reduce((sum, project) => sum + project.estConstructionCost, 0);
+  const nearTermCount = projects.filter((project) => project.estLetDateRange === nearTermRange).length;
+  const countyTotals = groupAmount(projects, "county");
+  const timingTotals = groupAmount(projects, "estLetDateRange");
+  const fundingCategoryTotals = Object.fromEntries(
+    fundingCategories.map(({ key }) => [key, projects.reduce((sum, project) => sum + project[key], 0)]),
+  );
+
+  return {
+    count: projects.length,
+    totalCost,
+    nearTermCount,
+    counties,
+    districts,
+    corridors,
+    countyTotals,
+    timingTotals,
+    fundingCategoryTotals,
+  };
+}
+
+// Filters the standalone geometry layer down to the currently filtered
+// projects, by the same dashed csj the document and the geometry file both
+// use - no undashed conversion needed here (that's only for zoomToProject's
+// on-demand lookups, kept for robustness against future format drift).
+function buildMapWhere(projects: ListedProject[]) {
+  const csjs = projects.map((project) => project.csj).filter(Boolean);
+  return csjs.length
+    ? `csj IN (${csjs.map((csj) => `'${csj.replaceAll("'", "''")}'`).join(",")})`
+    : "1=0";
 }
 
 function arcgisRenderer() {
   return {
     type: "unique-value",
-    field: "PT_PHASE",
-    defaultSymbol: {
-      type: "simple-line",
-      color: [55, 65, 81, 0.75],
-      width: 2.5,
-    },
-    uniqueValueInfos: Object.entries(colorByPhase).map(([value, color]) => ({
+    field: "estLetDateRange",
+    uniqueValueInfos: Object.entries(colorByTiming).map(([value, color]) => ({
       value,
       label: value,
       symbol: {
@@ -213,29 +326,27 @@ function arcgisRenderer() {
 
 export default function Home() {
   const mapRef = useRef<HTMLDivElement | null>(null);
-  const layerRef = useRef<ArcGisApi["FeatureLayer"] | null>(null);
+  const layerRef = useRef<ArcGisApi["GeoJSONLayer"] | null>(null);
   const viewRef = useRef<ReturnType<ArcGisApi["MapView"]> | null>(null);
   const [county, setCounty] = useState("All counties");
-  const [phase, setPhase] = useState("All phases");
+  const [timing, setTiming] = useState("All timing");
   const [search, setSearch] = useState("");
-  const [summary, setSummary] = useState<Summary>({
-    count: 0,
-    totalCost: 0,
-    mpoCost: 0,
-    nonMpoCost: 0,
-    nearTermCount: 0,
-    counties: [],
-    corridors: [],
-    countyTotals: [],
-    phaseTotals: [],
-    projects: [],
-    lastUpdated: null,
-  });
-  const [mapStatus, setMapStatus] = useState("Loading TxDOT AGO layer");
+  const [corridorFilter, setCorridorFilter] = useState<string | null>(null);
+  const [fundingCategory, setFundingCategory] = useState<
+    (typeof fundingCategories)[number]["key"] | "All categories"
+  >("All categories");
+  const [mapStatus, setMapStatus] = useState("Loading project geometry");
 
-  const definitionExpression = useMemo(
-    () => buildDefinition(county, phase, search),
-    [county, phase, search],
+  const filteredProjects = useMemo(
+    () => filterProjects(listedProjects, county, timing, search, corridorFilter, fundingCategory),
+    [county, timing, search, corridorFilter, fundingCategory],
+  );
+
+  const summary = useMemo(() => buildSummary(filteredProjects), [filteredProjects]);
+
+  const tableProjects = useMemo(
+    () => filteredProjects.slice().sort((a, b) => b.estConstructionCost - a.estConstructionCost),
+    [filteredProjects],
   );
 
   useEffect(() => {
@@ -255,49 +366,59 @@ export default function Home() {
         [
           "esri/Map",
           "esri/views/MapView",
-          "esri/layers/FeatureLayer",
+          "esri/layers/GeoJSONLayer",
           "esri/widgets/Legend",
           "esri/widgets/Expand",
+          "esri/widgets/Home",
         ],
-        (Map, MapView, FeatureLayer, Legend, Expand) => {
+        (Map, MapView, GeoJSONLayer, Legend, Expand, Home) => {
           if (!mapRef.current || viewRef.current) {
             return;
           }
 
-          const layer = new FeatureLayer({
-            url: TXDOT_LAYER_URL,
-            title: "TxDOT UTP Projects",
+          const countyLayer = new GeoJSONLayer({
+            url: COUNTY_BOUNDARY_GEOJSON_URL,
+            title: "H-GAC County Boundaries",
+            outFields: ["name"],
+            popupTemplate: { title: "{name} County" },
+            renderer: {
+              type: "simple",
+              symbol: {
+                type: "simple-fill",
+                color: [0, 0, 0, 0],
+                outline: { color: [71, 85, 105, 0.55], width: 1.25 },
+              },
+            },
+            labelingInfo: [
+              {
+                symbol: {
+                  type: "text",
+                  color: [71, 85, 105, 0.85],
+                  haloColor: "#f8fafc",
+                  haloSize: 1,
+                  font: { size: 9, family: "sans-serif" },
+                },
+                labelPlacement: "always-horizontal",
+                labelExpressionInfo: { expression: "$feature.name" },
+              },
+            ],
+          });
+
+          const layer = new GeoJSONLayer({
+            url: PROJECT_GEOMETRY_URL,
+            title: "TxDOT 2027 UTP Listed Projects",
             outFields: ["*"],
-            definitionExpression,
+            definitionExpression: buildMapWhere(filteredProjects),
             renderer: arcgisRenderer(),
             popupTemplate: {
-              title: "{HIGHWAY_NUMBER} in {COUNTY_NAME} County",
-              content: [
-                {
-                  type: "fields",
-                  fieldInfos: [
-                    { fieldName: "CONTROL_SECT_JOB", label: "CSJ" },
-                    { fieldName: "TYPE_OF_WORK", label: "Type of work" },
-                    { fieldName: "LIMITS_FROM", label: "From" },
-                    { fieldName: "LIMITS_TO", label: "To" },
-                    { fieldName: "PT_PHASE", label: "Project timing" },
-                    { fieldName: "ESTMTD_FISCAL_YR", label: "Estimated fiscal year" },
-                    {
-                      fieldName: "EST_CONSTRUCTION_COST",
-                      label: "Estimated construction cost",
-                      format: { digitSeparator: true, places: 0 },
-                    },
-                    { fieldName: "DISTRICT_NAME", label: "TxDOT district" },
-                    { fieldName: "MPO_NM", label: "MPO" },
-                  ],
-                },
-              ],
+              title: "{highway} in {county} County",
+              content: popupContent,
             },
           });
 
           const map = new Map({
             basemap: "gray-vector",
-            layers: [layer],
+            layers: [countyLayer, layer],
           });
 
           const view = new MapView({
@@ -317,19 +438,20 @@ export default function Home() {
             expanded: false,
             expandTooltip: "Show legend",
           });
+          const home = new Home({ view });
 
           view.ui.add(expand, "bottom-left");
+          view.ui.add(home, "top-left");
           layerRef.current = layer;
           viewRef.current = view;
 
           view
             .when()
             .then(() => {
-              setMapStatus("Live TxDOT AGO layer loaded");
-              refreshLayerSummary(layer, definitionExpression, setSummary);
-              zoomToLayer(layer, view, definitionExpression);
+              setMapStatus("Project geometry loaded");
+              zoomToLayer(layer, view, layer.definitionExpression).catch(() => undefined);
             })
-            .catch(() => setMapStatus("The TxDOT AGO layer could not be loaded"));
+            .catch(() => setMapStatus("The project geometry could not be loaded"));
         },
       );
     };
@@ -350,6 +472,7 @@ export default function Home() {
       viewRef.current = null;
       layerRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -359,11 +482,11 @@ export default function Home() {
       return;
     }
 
-    layer.definitionExpression = definitionExpression;
+    const mapWhere = buildMapWhere(filteredProjects);
+    layer.definitionExpression = mapWhere;
     layer.refresh();
-    refreshLayerSummary(layer, definitionExpression, setSummary);
-    zoomToLayer(layer, view, definitionExpression);
-  }, [definitionExpression]);
+    zoomToLayer(layer, view, mapWhere).catch(() => undefined);
+  }, [filteredProjects]);
 
   return (
     <main className="flex min-h-screen flex-col bg-background text-foreground">
@@ -375,20 +498,21 @@ export default function Home() {
                 H-GAC UTP Project Map
               </h1>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-700">
-                View Unified Transportation Program projects from TxDOT Project Info for the 13-county H-GAC region.
+                {listedProjects.length} projects individually listed in TxDOT&apos;s 2027 Unified
+                Transportation Program for the 8-county H-GAC MPO region.
               </p>
             </div>
             <a
-              href={`${TXDOT_LAYER_URL}/query?outFields=*&where=1%3D1`}
+              href={UTP_DOCUMENT_URL}
               target="_blank"
               rel="noreferrer"
               className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-medium transition hover:bg-muted"
             >
-              Source layer <ExternalLink className="size-4" />
+              Source document <ExternalLink className="size-4" />
             </a>
           </div>
 
-          <section className="grid gap-3 rounded-lg border bg-slate-50 p-3 lg:grid-cols-[1fr_1fr_1.4fr_auto]">
+          <section className="grid gap-3 rounded-lg border bg-slate-50 p-3 lg:grid-cols-[1fr_1fr_1fr_1.3fr_auto]">
             <label className="grid gap-1 text-xs font-medium text-muted-foreground">
               County
               <Select value={county} onValueChange={setCounty}>
@@ -408,14 +532,34 @@ export default function Home() {
 
             <label className="grid gap-1 text-xs font-medium text-muted-foreground">
               Timing
-              <Select value={phase} onValueChange={setPhase}>
+              <Select value={timing} onValueChange={setTiming}>
                 <SelectTrigger className="w-full bg-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {phaseOptions.map((option) => (
+                  {timingOptions.map((option) => (
                     <SelectItem key={option} value={option}>
                       {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+
+            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+              Funding Category
+              <Select
+                value={fundingCategory}
+                onValueChange={(value) => setFundingCategory(value as typeof fundingCategory)}
+              >
+                <SelectTrigger className="w-full bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All categories">All categories</SelectItem>
+                  {fundingCategories.map((category) => (
+                    <SelectItem key={category.key} value={category.key} title={category.description}>
+                      {category.name.split(" - ")[0]}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -429,7 +573,7 @@ export default function Home() {
                 <Input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Highway, CSJ, limits, or work type"
+                  placeholder="Highway, CSJ, limits, or UTP action"
                   className="bg-white pl-8"
                 />
               </span>
@@ -441,8 +585,10 @@ export default function Home() {
               className="self-end bg-white"
               onClick={() => {
                 setCounty("All counties");
-                setPhase("All phases");
+                setTiming("All timing");
                 setSearch("");
+                setCorridorFilter(null);
+                setFundingCategory("All categories");
               }}
             >
               <Filter /> Reset
@@ -451,16 +597,23 @@ export default function Home() {
         </div>
       </header>
 
-      <section className="mx-auto grid w-full max-w-7xl gap-4 px-4 py-4 sm:px-6 lg:grid-cols-4 lg:px-8">
-        <Metric label="2027 UTP features" value={summary.count.toLocaleString()} detail="Live AGO records in view" />
+      <section className="mx-auto grid w-full max-w-7xl gap-4 px-4 py-4 sm:px-6 lg:grid-cols-3 lg:px-8">
+        <Metric
+          label="2027 UTP features"
+          value={summary.count.toLocaleString()}
+          detail="Listed in the 2027 UTP document"
+        />
         <Metric label="Estimated cost" value={formatCurrency(summary.totalCost)} detail="Construction cost total" />
-        <Metric label="8-county MPO" value={formatCurrency(summary.mpoCost)} detail="Metropolitan counties" />
-        <Metric label="Near-term projects" value={summary.nearTermCount.toLocaleString()} detail="FY 2027-2030" />
+        <Metric
+          label="Near-term projects"
+          value={summary.nearTermCount.toLocaleString()}
+          detail={nearTermRange ?? "N/A"}
+        />
       </section>
 
-      <section className="mx-auto grid w-full max-w-7xl flex-1 gap-4 px-4 pb-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-8">
-        <div className="grid content-start gap-4">
-          <section className="overflow-hidden rounded-lg border bg-white shadow-sm">
+      <section className="mx-auto grid w-full max-w-7xl flex-1 gap-4 overflow-hidden px-4 pb-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-8">
+        <div className="grid min-w-0 content-start gap-4 overflow-hidden">
+          <section className="isolate min-w-0 overflow-hidden rounded-lg border bg-white shadow-sm">
             <div className="flex items-center justify-between border-b px-4 py-3">
               <h2 className="flex items-center gap-2 text-base font-semibold">
                 <MapPinned className="size-4 text-emerald-700" /> 2027 UTP Project Locations
@@ -469,27 +622,28 @@ export default function Home() {
                 {mapStatus}
               </Badge>
             </div>
-            <div ref={mapRef} className="h-[620px] w-full" />
+            <div ref={mapRef} className="h-[620px] w-full min-w-0 max-w-full overflow-hidden" />
           </section>
 
           <ProjectList
+            projects={tableProjects}
             layer={layerRef.current}
-            summary={summary}
             view={viewRef.current}
           />
         </div>
 
-        <aside className="grid content-start gap-4">
+        <aside className="relative z-10 grid min-w-0 content-start gap-4">
           <section className="rounded-lg border bg-white p-4 shadow-sm">
             <h2 className="flex items-center gap-2 text-base font-semibold">
               <Layers className="size-4 text-cyan-700" /> Current View
             </h2>
             <div className="mt-4 grid grid-cols-2 gap-3">
-              <SmallMetric label="5 non-MPO" value={formatCurrency(summary.nonMpoCost)} />
               <SmallMetric label="Counties" value={summary.counties.length.toLocaleString()} />
+              <SmallMetric label="Districts" value={summary.districts.length.toLocaleString()} />
             </div>
             <p className="mt-3 text-xs leading-5 text-muted-foreground">
-              Counts and costs are queried from the TxDOT AGO layer using the active filters. This map intentionally excludes non-UTP records.
+              Counts and costs come from TxDOT&apos;s 2027 UTP Listed Projects document using the
+              active filters. Map geometry is a standalone extract, not a live GIS query.
             </p>
           </section>
 
@@ -521,7 +675,15 @@ export default function Home() {
             <h2 className="text-base font-semibold">Counties In View</h2>
             <div className="mt-3 flex flex-wrap gap-2">
               {summary.counties.slice(0, 13).map((item) => (
-                <Badge key={item} variant="outline" className="rounded-md">
+                <Badge
+                  key={item}
+                  variant="outline"
+                  render={<button type="button" aria-pressed={county === item} />}
+                  className={`cursor-pointer rounded-md transition ${
+                    county === item ? "border-emerald-600 bg-emerald-50" : "hover:bg-muted"
+                  }`}
+                  onClick={() => setCounty(county === item ? "All counties" : item)}
+                >
                   {item}
                 </Badge>
               ))}
@@ -529,13 +691,54 @@ export default function Home() {
           </section>
 
           <section className="rounded-lg border bg-white p-4 shadow-sm">
-            <h2 className="text-base font-semibold">Project Timing</h2>
+            <h2 className="text-base font-semibold">Est. Let Date Range</h2>
             <div className="mt-3 grid gap-2">
-              {summary.phaseTotals.map(([item, amount]) => (
-                <div key={item} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+              {summary.timingTotals.map(([item, amount]) => (
+                <button
+                  key={item}
+                  type="button"
+                  aria-pressed={timing === item}
+                  className={`flex items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition ${
+                    timing === item ? "border-emerald-600 bg-emerald-50" : "hover:bg-muted"
+                  }`}
+                  onClick={() => setTiming(timing === item ? "All timing" : item)}
+                >
                   <span>{item}</span>
                   <span className="font-medium">{formatCurrency(amount)}</span>
-                </div>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-lg border bg-white p-4 shadow-sm">
+            <h2 className="text-base font-semibold">Funding Categories</h2>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              TxDOT organizes the UTP into 12 prescribed funding categories; only these three
+              apply to H-GAC listed projects.
+            </p>
+            <div className="mt-3 grid gap-3">
+              {fundingCategories.map((category) => (
+                <button
+                  key={category.key}
+                  type="button"
+                  aria-pressed={fundingCategory === category.key}
+                  className={`rounded-md border px-3 py-2 text-left transition ${
+                    fundingCategory === category.key
+                      ? "border-emerald-600 bg-emerald-50"
+                      : "hover:bg-muted"
+                  }`}
+                  onClick={() =>
+                    setFundingCategory(fundingCategory === category.key ? "All categories" : category.key)
+                  }
+                >
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <span className="font-medium">{category.name}</span>
+                    <span className="font-medium whitespace-nowrap">
+                      {formatCurrency(summary.fundingCategoryTotals[category.key] ?? 0)}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{category.description}</p>
+                </button>
               ))}
             </div>
           </section>
@@ -547,8 +750,13 @@ export default function Home() {
                 <button
                   key={item}
                   type="button"
-                  className="rounded-md border px-3 py-2 text-left text-sm transition hover:bg-muted"
-                  onClick={() => setSearch(item)}
+                  aria-pressed={item === corridorFilter}
+                  className={`rounded-md border px-3 py-2 text-left text-sm transition ${
+                    item === corridorFilter
+                      ? "border-emerald-600 bg-emerald-50"
+                      : "hover:bg-muted"
+                  }`}
+                  onClick={() => setCorridorFilter(item === corridorFilter ? null : item)}
                 >
                   {item}
                 </button>
@@ -559,17 +767,23 @@ export default function Home() {
           <section className="rounded-lg border bg-white p-4 shadow-sm">
             <h2 className="text-base font-semibold">How To Use</h2>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Pan or zoom the map, select a project line, and use the popup to review CSJ, limits, work type, timing, district, MPO, and estimated construction cost.
+              Pan or zoom the map, select a project line, and use the popup to review CSJ,
+              district, limits, UTP action, est. let date range, cost, and funding categories from
+              the 2027 UTP document.
             </p>
-            {summary.lastUpdated ? (
-              <p className="mt-3 text-xs text-muted-foreground">
-                Layer update: {summary.lastUpdated}
-              </p>
-            ) : null}
           </section>
         </aside>
       </section>
 
+      <footer className="border-t bg-white">
+        <div className="mx-auto flex max-w-7xl flex-col items-center gap-3 px-4 py-6 text-center sm:px-6 lg:px-8">
+          <img src="/hgac-logo.png" alt="Houston-Galveston Area Council" className="h-16 w-16" />
+          <p className="text-xs text-muted-foreground">
+            Houston-Galveston Area Council (H-GAC) &middot; TxDOT 2027 Unified Transportation
+            Program explorer
+          </p>
+        </div>
+      </footer>
     </main>
   );
 }
@@ -585,14 +799,17 @@ function Metric({ label, value, detail }: { label: string; value: string; detail
 }
 
 function ProjectList({
+  projects,
   layer,
-  summary,
   view,
 }: {
-  layer: ArcGisApi["FeatureLayer"] | null;
-  summary: Summary;
+  projects: ProjectRecord[];
+  layer: ArcGisApi["GeoJSONLayer"] | null;
   view: ReturnType<ArcGisApi["MapView"]> | null;
 }) {
+  const [selectedCsj, setSelectedCsj] = useState<string | null>(null);
+  const [unavailableCsj, setUnavailableCsj] = useState<string | null>(null);
+
   return (
     <section className="rounded-lg border bg-white p-4 shadow-sm">
       <div className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-center lg:justify-between">
@@ -601,11 +818,18 @@ function ProjectList({
             <TableProperties className="size-4 text-slate-700" /> 2027 UTP Project List
           </h2>
           <p className="text-sm text-muted-foreground">
-            Select a project to zoom the map to its location. The list uses the same live AGO filter as the map.
+            Select a row to zoom the map to its location; select it again to deselect. The list
+            uses the same filters as the map.
           </p>
+          {unavailableCsj ? (
+            <p className="mt-1 text-sm text-amber-700">
+              No map location found for {unavailableCsj} in the standalone project geometry file -
+              re-run scripts/build-project-geometry.js if this project was added recently.
+            </p>
+          ) : null}
         </div>
         <Badge variant="outline" className="w-fit rounded-md">
-          Showing top {Math.min(summary.projects.length, 60)} by cost
+          Showing all {projects.length} listed project{projects.length === 1 ? "" : "s"}
         </Badge>
       </div>
       <Table>
@@ -613,40 +837,55 @@ function ProjectList({
           <TableRow>
             <TableHead>Project</TableHead>
             <TableHead>County</TableHead>
+            <TableHead>District</TableHead>
             <TableHead>Location</TableHead>
-            <TableHead>Work</TableHead>
+            <TableHead>UTP Action</TableHead>
             <TableHead>Timing</TableHead>
-            <TableHead>FY</TableHead>
             <TableHead className="text-right">Cost</TableHead>
-            <TableHead className="text-right">Map</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {summary.projects.slice(0, 60).map((project) => (
-            <TableRow key={project.objectId}>
+          {projects.map((project) => (
+            <TableRow
+              key={project.csj}
+              aria-selected={project.csj === selectedCsj}
+              className={`cursor-pointer ${project.csj === selectedCsj ? "bg-emerald-50" : "hover:bg-muted/50"}`}
+              onClick={() => {
+                if (project.csj === selectedCsj) {
+                  setSelectedCsj(null);
+                  setUnavailableCsj(null);
+                  if (layer && view) {
+                    zoomToLayer(layer, view, layer.definitionExpression).catch(() => undefined);
+                  }
+                  return;
+                }
+
+                setSelectedCsj(project.csj);
+                setUnavailableCsj(null);
+                zoomToProject(project.csj, layer, view)
+                  .then((found) => {
+                    if (!found) {
+                      setUnavailableCsj(project.csj);
+                    }
+                  })
+                  .catch(() => setUnavailableCsj(project.csj));
+              }}
+            >
               <TableCell>
-                <div className="font-medium">{project.corridor}</div>
+                <div className="font-medium">{project.highway}</div>
                 <div className="font-mono text-xs text-muted-foreground">{project.csj}</div>
               </TableCell>
               <TableCell>{project.county}</TableCell>
-              <TableCell className="max-w-[280px] whitespace-normal text-muted-foreground">
-                {project.limits}
+              <TableCell className="text-muted-foreground">{project.district}</TableCell>
+              <TableCell className="max-w-[240px] whitespace-normal text-muted-foreground">
+                {project.limitsFrom} to {project.limitsTo}
               </TableCell>
-              <TableCell className="max-w-[240px] whitespace-normal">{project.work}</TableCell>
-              <TableCell className="max-w-[220px] whitespace-normal text-muted-foreground">
-                {project.phase}
+              <TableCell className="max-w-[200px] whitespace-normal">{project.utpAction}</TableCell>
+              <TableCell className="max-w-[160px] whitespace-normal text-muted-foreground">
+                {project.estLetDateRange}
               </TableCell>
-              <TableCell>{project.fiscalYear ?? "N/A"}</TableCell>
-              <TableCell className="text-right font-semibold">{formatCurrency(project.cost)}</TableCell>
-              <TableCell className="text-right">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => zoomToProject(project.objectId, layer, view)}
-                >
-                  <LocateFixed /> Zoom
-                </Button>
+              <TableCell className="text-right font-semibold">
+                {formatCurrency(project.estConstructionCost)}
               </TableCell>
             </TableRow>
           ))}
@@ -665,98 +904,8 @@ function SmallMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-async function refreshLayerSummary(
-  layer: ArcGisApi["FeatureLayer"],
-  where: string,
-  setSummary: (summary: Summary) => void,
-) {
-  const response = await layer.queryFeatures({
-    where,
-    outFields: [
-      "OBJECTID",
-      "CONTROL_SECT_JOB",
-      "COUNTY_NAME",
-      "DISTRICT_NAME",
-      "HIGHWAY_NUMBER",
-      "HWY_NBR",
-      "LIMITS_FROM",
-      "LIMITS_TO",
-      "TYPE_OF_WORK",
-      "PROJ_CLASS",
-      "PROJ_STAT",
-      "PROJ_STG",
-      "PT_PHASE",
-      "ESTMTD_FISCAL_YR",
-      "EST_CONSTRUCTION_COST",
-      "LAST_PROJ_UPDATE_DT",
-      "MPO_NM",
-      "PROJ_ID",
-    ],
-    returnGeometry: false,
-    num: 2000,
-  });
-
-  const attributes = response.features?.map((feature) => feature.attributes) ?? [];
-  const counties = uniqueSorted(attributes.map((item) => item.COUNTY_NAME).filter(Boolean));
-  const corridors = topValues(
-    attributes.map((item) => item.HIGHWAY_NUMBER || item.HWY_NBR).filter(Boolean),
-  );
-  const projects = attributes.map(toProjectRecord).sort((a, b) => b.cost - a.cost);
-  const totalCost = attributes.reduce(
-    (sum, item) => sum + Number(item.EST_CONSTRUCTION_COST ?? 0),
-    0,
-  );
-  const mpoCost = projects
-    .filter((project) => project.group === "8-county MPO")
-    .reduce((sum, project) => sum + project.cost, 0);
-  const nonMpoCost = totalCost - mpoCost;
-  const nearTermCount = projects.filter(
-    (project) => project.fiscalYear !== null && project.fiscalYear <= 2030,
-  ).length;
-  const countyTotals = groupAmount(projects, "county");
-  const phaseTotals = groupAmount(projects, "phase");
-  const latestUpdate = Math.max(
-    ...attributes.map((item) => Number(item.LAST_PROJ_UPDATE_DT ?? 0)),
-    0,
-  );
-
-  setSummary({
-    count: attributes.length,
-    totalCost,
-    mpoCost,
-    nonMpoCost,
-    nearTermCount,
-    counties,
-    corridors,
-    countyTotals,
-    phaseTotals,
-    projects,
-    lastUpdated: latestUpdate ? new Date(latestUpdate).toLocaleDateString() : null,
-  });
-}
-
-function toProjectRecord(attributes: ArcGisFeatureAttributes): ProjectRecord {
-  const county = attributes.COUNTY_NAME || "Unknown";
-  const from = attributes.LIMITS_FROM || "Unknown";
-  const to = attributes.LIMITS_TO || "Unknown";
-
-  return {
-    objectId: Number(attributes.OBJECTID),
-    csj: attributes.CONTROL_SECT_JOB || "N/A",
-    county,
-    district: attributes.DISTRICT_NAME || "Unknown",
-    corridor: attributes.HIGHWAY_NUMBER || attributes.HWY_NBR || "Unknown",
-    limits: `${from} to ${to}`,
-    work: attributes.TYPE_OF_WORK || attributes.PROJ_CLASS || "Unspecified",
-    phase: attributes.PT_PHASE || "Unspecified",
-    fiscalYear: attributes.ESTMTD_FISCAL_YR ?? null,
-    cost: Number(attributes.EST_CONSTRUCTION_COST ?? 0),
-    group: mpoCounties.has(county) ? "8-county MPO" : "5-county non-MPO",
-  };
-}
-
 async function zoomToLayer(
-  layer: ArcGisApi["FeatureLayer"],
+  layer: ArcGisApi["GeoJSONLayer"],
   view: ReturnType<ArcGisApi["MapView"]>,
   where: string,
 ) {
@@ -766,33 +915,38 @@ async function zoomToLayer(
   }
 }
 
+// Every listed project has geometry in the standalone file as of the last
+// scripts/build-project-geometry.js run, but this can still legitimately
+// return false if the document is updated without re-running that script.
 async function zoomToProject(
-  objectId: number,
-  layer: ArcGisApi["FeatureLayer"] | null,
+  csj: string,
+  layer: ArcGisApi["GeoJSONLayer"] | null,
   view: ReturnType<ArcGisApi["MapView"]> | null,
 ) {
   if (!layer || !view) {
-    return;
+    return false;
   }
 
-  const where = `OBJECTID = ${objectId}`;
+  const where = `csj = '${csj.replaceAll("'", "''")}'`;
+  const featureResult = await layer.queryFeatures({ where, outFields: ["*"], returnGeometry: true });
+  const feature = featureResult.features?.[0];
+  if (!feature) {
+    return false;
+  }
+
   const extentResult = await layer.queryExtent({ where });
   if (extentResult.extent) {
     await (view as any).goTo(extentResult.extent, { duration: 500 }).catch(() => undefined);
   }
 
-  const featureResult = await layer.queryFeatures({
-    where,
-    outFields: ["*"],
-    returnGeometry: true,
-  });
-  const feature = featureResult.features?.[0];
-  if (feature) {
+  if (typeof (view as any).popup?.open === "function") {
     (view as any).popup.open({
       features: [feature],
       location: (feature as any).geometry?.extent?.center ?? (feature as any).geometry,
     });
   }
+
+  return true;
 }
 
 function uniqueSorted(values: string[]) {
@@ -810,10 +964,10 @@ function topValues(values: string[]) {
     .map(([value]) => value);
 }
 
-function groupAmount(projects: ProjectRecord[], key: "county" | "phase") {
+function groupAmount(projects: ListedProject[], key: "county" | "estLetDateRange") {
   const totals = projects.reduce<Record<string, number>>((acc, project) => {
     const value = project[key] || "Unspecified";
-    acc[value] = (acc[value] ?? 0) + project.cost;
+    acc[value] = (acc[value] ?? 0) + project.estConstructionCost;
     return acc;
   }, {});
 

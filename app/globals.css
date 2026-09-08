@@ -132,3 +132,9 @@ body {
     @apply font-sans;
   }
 }
+
+.esri-view,
+.esri-view-root,
+.esri-view-surface {
+  max-width: 100%;
+}
