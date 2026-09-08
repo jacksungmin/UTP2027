@@ -42,12 +42,17 @@ const listedProjects = listedProjectsData as ListedProject[];
 
 const UTP_DOCUMENT_URL = "https://ftp.txdot.gov/pub/txdot/get-involved/tpp/utp/2027utp.pdf";
 
+// Matches next.config.ts's basePath (set only for the GitHub Pages build).
+// Next.js applies basePath automatically to its own framework assets, but
+// not to plain hardcoded paths like the ones below, so those need it too.
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
 // Standalone GeoJSON extracted from TxDOT's and H-GAC's live GIS services by
 // scripts/build-project-geometry.js - see that script for how these are
 // generated and re-run it whenever lib/utp-2027-listed-projects.json changes.
 // The map no longer queries any live ArcGIS service at runtime.
-const PROJECT_GEOMETRY_URL = "/utp-2027-project-geometry.geojson";
-const COUNTY_BOUNDARY_GEOJSON_URL = "/hgac-county-boundaries.geojson";
+const PROJECT_GEOMETRY_URL = `${BASE_PATH}/utp-2027-project-geometry.geojson`;
+const COUNTY_BOUNDARY_GEOJSON_URL = `${BASE_PATH}/hgac-county-boundaries.geojson`;
 
 const hgacCounties = [
   "Brazoria",
@@ -777,7 +782,11 @@ export default function Home() {
 
       <footer className="border-t bg-white">
         <div className="mx-auto flex max-w-7xl flex-col items-center gap-3 px-4 py-6 text-center sm:px-6 lg:px-8">
-          <img src="/hgac-logo.png" alt="Houston-Galveston Area Council" className="h-16 w-16" />
+          <img
+            src={`${BASE_PATH}/hgac-logo.png`}
+            alt="Houston-Galveston Area Council"
+            className="h-16 w-16"
+          />
           <p className="text-xs text-muted-foreground">
             Houston-Galveston Area Council (H-GAC) &middot; TxDOT 2027 Unified Transportation
             Program explorer
