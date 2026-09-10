@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
+  Download,
   ExternalLink,
   Filter,
   Layers,
@@ -184,6 +185,58 @@ function formatCurrency(value: number) {
   }
 
   return `$${currency.format(value / 1_000_000)}M`;
+}
+
+function csvEscape(value: string | number) {
+  const text = String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+// Exports whatever's currently in the table - full unrounded cost figures,
+// not the "$1.2M" display formatting, since a CSV is meant for further
+// analysis rather than on-screen reading.
+function projectsToCsv(projects: ProjectRecord[]) {
+  const headers = [
+    "Highway",
+    "CSJ",
+    "County",
+    "District",
+    "Limits From",
+    "Limits To",
+    "UTP Action",
+    "Est. Let Date Range",
+    "Est. Construction Cost",
+    ...fundingCategories.map((category) => category.name.split(" - ")[0]),
+  ];
+
+  const rows = projects.map((project) => [
+    project.highway,
+    project.csj,
+    project.county,
+    project.district,
+    project.limitsFrom,
+    project.limitsTo,
+    project.utpAction,
+    project.estLetDateRange,
+    project.estConstructionCost,
+    ...fundingCategories.map((category) => project[category.key]),
+  ]);
+
+  return [headers, ...rows].map((row) => row.map(csvEscape).join(",")).join("\r\n");
+}
+
+function downloadCsv(filename: string, csvContent: string) {
+  // Leading BOM so Excel (the common destination for a CSV like this)
+  // detects UTF-8 instead of misreading it as the system codepage.
+  const blob = new Blob(["﻿", csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 // The document's CSJ is formatted with dashes (e.g. "1024-01-077"); the GIS
@@ -837,9 +890,20 @@ function ProjectList({
             </p>
           ) : null}
         </div>
-        <Badge variant="outline" className="w-fit rounded-md">
-          Showing all {projects.length} listed project{projects.length === 1 ? "" : "s"}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="w-fit rounded-md">
+            Showing all {projects.length} listed project{projects.length === 1 ? "" : "s"}
+          </Badge>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={projects.length === 0}
+            onClick={() => downloadCsv("utp-2027-projects.csv", projectsToCsv(projects))}
+          >
+            <Download /> Export CSV
+          </Button>
+        </div>
       </div>
       <Table>
         <TableHeader>
